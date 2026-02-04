@@ -1,189 +1,433 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import swaggerUi from "swagger-ui-express";
-import { Pool } from "pg";
 
-dotenv.config();
+import swaggerUi from "swagger-ui-express";
+import swaggerJsdoc from "swagger-jsdoc";
+
+import { ensureRedis } from "./cache/redis";
+import { getOrSetJSON, delKey } from "./cache/cacheHelpers";
+import { pool } from "./db/pool";
+
+dotenv.config({ path: "./.env" });
 
 const app = express();
+const PORT = Number(process.env.PORT) || 4000;
+
 app.use(cors());
 app.use(express.json());
 
-/**
- * Postgres connection
- */
-const pool = new Pool({
-  host: process.env.DB_HOST ?? "localhost",
-  port: Number(process.env.DB_PORT ?? 5432),
-  user: process.env.DB_USER ?? "salon",
-  password: process.env.DB_PASSWORD ?? "salon",
-  database: process.env.DB_NAME ?? "salon_db"
+/* ======================
+   SWAGGER (INLINE with PATHS)
+====================== */
+const swaggerSpec = swaggerJsdoc({
+  definition: {
+    openapi: "3.0.0",
+    info: {
+      title: "Salon API",
+      version: "1.0.0",
+      description: "Salon reservation backend API"
+    },
+    servers: [{ url: `http://localhost:${PORT}` }],
+    paths: {
+      "/health": {
+        get: {
+          summary: "Health check",
+          responses: {
+            "200": {
+              description: "OK"
+            }
+          }
+        }
+      },
+      "/settings": {
+        get: {
+          summary: "Get salon settings",
+          responses: {
+            "200": { description: "Settings object" }
+          }
+        },
+        put: {
+          summary: "Update salon settings",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string", example: "Trač" },
+                    description: { type: "string", example: "Opis salona" },
+                    working_hours: { type: "string", example: "Mon-Fri 09-17" }
+                  },
+                  required: ["name", "description", "working_hours"]
+                }
+              }
+            }
+          },
+          responses: {
+            "200": { description: "Updated settings" }
+          }
+        }
+      },
+      "/catalog": {
+        get: {
+          summary: "Get catalog (categories + services)",
+          responses: {
+            "200": { description: "Catalog list" }
+          }
+        }
+      },
+      "/reservations": {
+        get: {
+          summary: "List reservations (admin)",
+          responses: { "200": { description: "List of reservations" } }
+        },
+        post: {
+          summary: "Create reservation",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    first_name: { type: "string" },
+                    last_name: { type: "string" },
+                    email: { type: "string" },
+                    phone: { type: "string" },
+                    address1: { type: "string" },
+                    postal_code: { type: "string" },
+                    city: { type: "string" },
+                    country: { type: "string" },
+                    currency: { type: "string", example: "RSD" },
+                    items: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          service_id: { type: "integer" },
+                          date: { type: "string", example: "2026-02-10" },
+                          time: { type: "string", example: "10:00" }
+                        },
+                        required: ["service_id", "date", "time"]
+                      }
+                    }
+                  },
+                  required: ["first_name", "last_name", "email", "address1", "postal_code", "city", "country", "items"]
+                }
+              }
+            }
+          },
+          responses: {
+            "201": { description: "Created reservation" },
+            "400": { description: "Validation error" },
+            "500": { description: "Server error" }
+          }
+        }
+      }
+    }
+  },
+  apis: []
 });
 
-/**
- * Health check
- */
+app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+/* ======================
+   HEALTH
+====================== */
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "salon-backend" });
+  res.json({ status: "ok" });
 });
 
-/**
- * SETTINGS
- */
+/* ======================
+   SETTINGS (CACHED)
+====================== */
+const SETTINGS_CACHE_KEY = "settings:v1";
+const SETTINGS_TTL = 300;
+
 app.get("/settings", async (_req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM settings WHERE id = 1");
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: "Settings not found" });
-    }
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error("GET /settings error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    const result = await getOrSetJSON(SETTINGS_CACHE_KEY, SETTINGS_TTL, async () => {
+      const { rows } = await pool.query("SELECT * FROM settings LIMIT 1");
+      return rows[0];
+    });
+
+    console.log(result.hit ? "🟢 settings CACHE HIT" : "🟡 settings CACHE MISS");
+    res.json(result.data);
+  } catch (e) {
+    res.status(500).json({ message: "Failed to load settings" });
   }
 });
 
 app.put("/settings", async (req, res) => {
   try {
-    const {
-      name,
-      location,
-      description,
-      working_hours,
-      base_currency,
-      discount_until,
-      discount_percent
-    } = req.body ?? {};
+    const { name, description, working_hours } = req.body;
 
-    if (!name || !location || !description || !working_hours) {
-      return res.status(400).json({ message: "Missing required fields" });
-    }
-
-    const q = `
-      UPDATE settings
-      SET
-        name = $1,
-        location = $2,
-        description = $3,
-        working_hours = $4,
-        base_currency = COALESCE($5, base_currency),
-        discount_until = $6,
-        discount_percent = COALESCE($7, discount_percent),
-        updated_at = NOW()
-      WHERE id = 1
-      RETURNING *;
-    `;
-
-    const values = [
-      name,
-      location,
-      description,
-      working_hours,
-      base_currency ?? null,
-      discount_until ?? null,
-      discount_percent ?? null
-    ];
-
-    const result = await pool.query(q, values);
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error("PUT /settings error:", err);
-    res.status(500).json({ message: "Internal server error" });
-  }
-});
-
-/**
- * CATEGORIES
- */
-app.get("/categories", async (_req, res) => {
-  try {
-    const result = await pool.query(
-      "SELECT id, name FROM categories ORDER BY name ASC"
+    const { rows } = await pool.query(
+      `UPDATE settings
+       SET name = $1, description = $2, working_hours = $3
+       RETURNING *`,
+      [name, description, working_hours]
     );
-    res.json(result.rows);
-  } catch (err) {
-    console.error("GET /categories error:", err);
-    res.status(500).json({ message: "Internal server error" });
+
+    await delKey(SETTINGS_CACHE_KEY);
+    console.log("🧹 settings cache invalidated");
+
+    res.json(rows[0]);
+  } catch {
+    res.status(500).json({ message: "Failed to update settings" });
   }
 });
 
-/**
- * CATALOG (categories + services)
- */
+/* ======================
+   CATALOG (CACHED)
+====================== */
+const CATALOG_CACHE_KEY = "catalog:v1";
+const CATALOG_TTL = 180;
+
 app.get("/catalog", async (_req, res) => {
   try {
-    const q = `
-      SELECT
-        c.id AS category_id,
-        c.name AS category_name,
-        s.id AS service_id,
-        s.name AS service_name,
-        s.duration_minutes,
-        s.price_rsd
-      FROM categories c
-      LEFT JOIN services s ON s.category_id = c.id
-      ORDER BY c.name ASC, s.name ASC;
-    `;
+    const result = await getOrSetJSON(CATALOG_CACHE_KEY, CATALOG_TTL, async () => {
+      const { rows } = await pool.query(`
+        SELECT
+          c.id,
+          c.name,
+          COALESCE(
+            json_agg(
+              CASE WHEN s.id IS NULL THEN NULL ELSE
+                json_build_object(
+                  ''id', s.id,
+                  'name', s.name,
+                  'duration_minutes', s.duration_minutes,
+                  'price_rsd', s.price_rsd
+                )
+              END
+            ) FILTER (WHERE s.id IS NOT NULL),
+            '[]'::json
+          ) AS services
+        FROM categories c
+        LEFT JOIN services s ON s.category_id = c.id
+        GROUP BY c.id
+      `);
 
-    const result = await pool.query(q);
+      return rows;
+    });
 
-    const map: Record<string, any> = {};
-    for (const row of result.rows) {
-      const key = String(row.category_id);
-      if (!map[key]) {
-        map[key] = {
-          id: row.category_id,
-          name: row.category_name,
-          services: []
-        };
-      }
-      if (row.service_id) {
-        map[key].services.push({
-          id: row.service_id,
-          name: row.service_name,
-          duration_minutes: row.duration_minutes,
-          price_rsd: row.price_rsd
-        });
-      }
+    console.log(result.hit ? "🟢 catalog CACHE HIT" : "🟡 catalog CACHE MISS");
+    res.json(result.data);
+  } catch {
+    res.status(500).json({ message: "Failed to load catalog" });
+  }
+});
+
+function randomCode(len = 8) {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let out = "";
+  for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
+}
+
+app.post("/reservations", async (req, res) => {
+  try {
+    const {
+      first_name,
+      last_name,
+      email,
+      phone,
+      address1,
+      postal_code,
+      city,
+      country,
+      currency,
+      items
+    } = req.body;
+
+    // minimalna validacija
+    if (!first_name || !last_name || !email || !address1 || !postal_code || !city || !country) {
+      return res.status(400).json({ message: "Missing required customer fields" });
+    }
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ message: "At least one reservation item is required" });
     }
 
-    res.json(Object.values(map));
-  } catch (err) {
-    console.error("GET /catalog error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    const accessCode = randomCode(8);
+    const promoCode = randomCode(6);
+
+    const client = await pool.connect();
+
+    try {
+      await client.query("BEGIN");
+
+      // 1) Insert reservation header
+      const ins = await client.query(
+        `
+        INSERT INTO reservations
+          (first_name, last_name, email, phone, address1, postal_code, city, country,
+           access_code, promo_code, currency)
+        VALUES
+          ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        RETURNING *
+        `,
+        [
+          first_name,
+          last_name,
+          email,
+          phone ?? null,
+          address1,
+          postal_code,
+          city,
+          country,
+          accessCode,
+          promoCode,
+          currency ?? "RSD"
+        ]
+      );
+
+      const reservation = ins.rows[0];
+
+      // 2) Insert items + calculate total from services.price_rsd
+      let total = 0;
+
+      for (const it of items) {
+        const { service_id, date, time } = it;
+
+        if (!service_id || !date || !time) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({ message: "Each item needs service_id, date, time" });
+        }
+
+        const svc = await client.query(
+          "SELECT id, price_rsd FROM services WHERE id = $1",
+          [service_id]
+        );
+
+        if (svc.rows.length === 0) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({ message: `Service ${service_id} not found` });
+        }
+
+        const unitPrice = Number(svc.rows[0].price_rsd);
+        const lineTotal = unitPrice;
+
+        total += lineTotal;
+
+        await client.query(
+          `
+          INSERT INTO reservation_items
+            (reservation_id, service_id, date, time, unit_price, line_total)
+          VALUES
+            ($1,$2,$3,$4,$5,$6)
+          `,
+          [reservation.id, service_id, date, time, unitPrice, lineTotal]
+        );
+      }
+
+      // 3) update total_amount
+      await client.query(
+        "UPDATE reservations SET total_amount = $1 WHERE id = $2",
+        [total, reservation.id]
+      );
+
+      await client.query("COMMIT");
+
+      return res.status(201).json({
+        reservationId: reservation.id,
+        accessCode: reservation.access_code,
+        promoCode: reservation.promo_code,
+        totalAmount: total,
+        status: reservation.status
+      });
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (err: any) {
+    console.error("POST /reservations error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to create reservation" });
+
   }
 });
 
-/**
- * Swagger / OpenAPI
- */
-const openapiSpec = {
-  openapi: "3.0.0",
-  info: {
-    title: "Salon API",
-    version: "1.0.0",
-    description: "Backend API for Salon Reservation System"
-  },
-  servers: [{ url: "http://localhost:4000" }],
-  paths: {
-    "/health": { get: { summary: "Health check" } },
-    "/settings": {
-      get: { summary: "Get salon settings" },
-      put: { summary: "Update salon settings" }
-    },
-    "/categories": { get: { summary: "List categories" } },
-    "/catalog": { get: { summary: "Categories with services" } }
+app.get("/reservations", async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `
+      SELECT id, first_name, last_name, email, total_amount, status, created_at
+      FROM reservations
+      ORDER BY created_at DESC
+      LIMIT 50
+      `
+    );
+    res.json(rows);
+  } catch (err: any) {
+    console.error("GET /reservations error:", err?.message || err);
+    res.status(500).json({ message: "Failed to load reservations" });
   }
-};
-
-app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec));
-
-/**
- * Start server
- */
-const PORT = Number(process.env.PORT ?? 4000);
-app.listen(PORT, () => {
-  console.log(`Salon backend running on http://localhost:${PORT}`);
-  console.log(`Swagger docs available at http://localhost:${PORT}/docs`);
 });
+
+app.get("/reservations/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const header = await pool.query(
+      "SELECT * FROM reservations WHERE id = $1",
+      [id]
+    );
+    if (header.rows.length === 0) {
+      return res.status(404).json({ message: "Reservation not found" });
+    }
+
+    const items = await pool.query(
+      `
+      SELECT
+        ri.id,
+        ri.service_id,
+        s.name as service_name,
+        ri.date,
+        ri.time,
+        ri.unit_price,
+        ri.line_total
+      FROM reservation_items ri
+      JOIN services s ON s.id = ri.service_id
+      WHERE ri.reservation_id = $1
+      ORDER BY ri.date, ri.time
+      `,
+      [id]
+    );
+
+    res.json({
+      reservation: header.rows[0],
+      items: items.rows
+    });
+  } catch (err: any) {
+    console.error("GET /reservations/:id error:", err?.message || err);
+    res.status(500).json({ message: "Failed to load reservation" });
+  }
+});
+
+/* ======================
+   404
+====================== */
+app.use((_req, res) => {
+  res.status(404).json({ message: "Not found" });
+});
+
+/* ======================
+   START
+====================== */
+async function start() {
+  try {
+    await ensureRedis();
+  } catch {
+    console.warn("⚠️ Redis unavailable, continuing without cache");
+  }
+
+  app.listen(PORT, () => {
+    console.log(`✅ Server running on port ${PORT}`);
+  });
+}
+
+start();
