@@ -18,7 +18,7 @@ app.use(cors());
 app.use(express.json());
 
 /* ======================
-   SWAGGER (INLINE with PATHS)
+   SWAGGER
 ====================== */
 const swaggerSpec = swaggerJsdoc({
   definition: {
@@ -33,19 +33,13 @@ const swaggerSpec = swaggerJsdoc({
       "/health": {
         get: {
           summary: "Health check",
-          responses: {
-            "200": {
-              description: "OK"
-            }
-          }
+          responses: { "200": { description: "OK" } }
         }
       },
       "/settings": {
         get: {
           summary: "Get salon settings",
-          responses: {
-            "200": { description: "Settings object" }
-          }
+          responses: { "200": { description: "Settings object" } }
         },
         put: {
           summary: "Update salon settings",
@@ -58,24 +52,21 @@ const swaggerSpec = swaggerJsdoc({
                   properties: {
                     name: { type: "string", example: "Trač" },
                     description: { type: "string", example: "Opis salona" },
-                    working_hours: { type: "string", example: "Mon-Fri 09-17" }
+                    working_hours: { type: "string", example: "Mon-Fri 09-17" },
+                    discount_until: { type: "string", example: "2026-12-31", description: "Datum do kada važi 10% popust" }
                   },
                   required: ["name", "description", "working_hours"]
                 }
               }
             }
           },
-          responses: {
-            "200": { description: "Updated settings" }
-          }
+          responses: { "200": { description: "Updated settings" } }
         }
       },
       "/catalog": {
         get: {
           summary: "Get catalog (categories + services)",
-          responses: {
-            "200": { description: "Catalog list" }
-          }
+          responses: { "200": { description: "Catalog list" } }
         }
       },
       "/reservations": {
@@ -101,6 +92,7 @@ const swaggerSpec = swaggerJsdoc({
                     city: { type: "string" },
                     country: { type: "string" },
                     currency: { type: "string", example: "RSD" },
+                    promo_code_used: { type: "string", example: "AB3XYZ", description: "Opcioni promo kod za 5% popusta" },
                     items: {
                       type: "array",
                       items: {
@@ -123,6 +115,66 @@ const swaggerSpec = swaggerJsdoc({
             "201": { description: "Created reservation" },
             "400": { description: "Validation error" },
             "500": { description: "Server error" }
+          }
+        }
+      },
+      "/reservations/{id}": {
+        get: {
+          summary: "Get single reservation by ID",
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          responses: {
+            "200": { description: "Reservation details" },
+            "404": { description: "Not found" }
+          }
+        }
+      },
+      "/reservations/lookup": {
+        post: {
+          summary: "Lookup reservation by access code + email (za izmenu/otkazivanje)",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    access_code: { type: "string" },
+                    email: { type: "string" }
+                  },
+                  required: ["access_code", "email"]
+                }
+              }
+            }
+          },
+          responses: {
+            "200": { description: "Reservation found" },
+            "404": { description: "Not found" }
+          }
+        }
+      },
+      "/reservations/{id}/cancel": {
+        post: {
+          summary: "Cancel reservation",
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    access_code: { type: "string" },
+                    email: { type: "string" }
+                  },
+                  required: ["access_code", "email"]
+                }
+              }
+            }
+          },
+          responses: {
+            "200": { description: "Cancelled" },
+            "400": { description: "Already cancelled" },
+            "404": { description: "Not found" }
           }
         }
       }
@@ -152,23 +204,22 @@ app.get("/settings", async (_req, res) => {
       const { rows } = await pool.query("SELECT * FROM settings LIMIT 1");
       return rows[0];
     });
-
     console.log(result.hit ? "🟢 settings CACHE HIT" : "🟡 settings CACHE MISS");
     res.json(result.data);
-  } catch (e) {
+  } catch {
     res.status(500).json({ message: "Failed to load settings" });
   }
 });
 
 app.put("/settings", async (req, res) => {
   try {
-    const { name, description, working_hours } = req.body;
+    const { name, description, working_hours, discount_until } = req.body;
 
     const { rows } = await pool.query(
       `UPDATE settings
-       SET name = $1, description = $2, working_hours = $3
+       SET name = $1, description = $2, working_hours = $3, discount_until = $4
        RETURNING *`,
-      [name, description, working_hours]
+      [name, description, working_hours, discount_until ?? null]
     );
 
     await delKey(SETTINGS_CACHE_KEY);
@@ -197,7 +248,7 @@ app.get("/catalog", async (_req, res) => {
             json_agg(
               CASE WHEN s.id IS NULL THEN NULL ELSE
                 json_build_object(
-                  ''id', s.id,
+                  'id', s.id,
                   'name', s.name,
                   'duration_minutes', s.duration_minutes,
                   'price_rsd', s.price_rsd
@@ -209,8 +260,8 @@ app.get("/catalog", async (_req, res) => {
         FROM categories c
         LEFT JOIN services s ON s.category_id = c.id
         GROUP BY c.id
+        ORDER BY c.id
       `);
-
       return rows;
     });
 
@@ -221,6 +272,9 @@ app.get("/catalog", async (_req, res) => {
   }
 });
 
+/* ======================
+   HELPERS
+====================== */
 function randomCode(len = 8) {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let out = "";
@@ -228,22 +282,28 @@ function randomCode(len = 8) {
   return out;
 }
 
+// Proverava da li danas pada pre ili na datum discount_until
+function isDiscountActive(discountUntil: string | null): boolean {
+  if (!discountUntil) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const until = new Date(discountUntil);
+  until.setHours(0, 0, 0, 0);
+  return today <= until;
+}
+
+/* ======================
+   POST /reservations
+====================== */
 app.post("/reservations", async (req, res) => {
   try {
     const {
-      first_name,
-      last_name,
-      email,
-      phone,
-      address1,
-      postal_code,
-      city,
-      country,
-      currency,
-      items
+      first_name, last_name, email, phone,
+      address1, postal_code, city, country,
+      currency, promo_code_used, items
     } = req.body;
 
-    // minimalna validacija
+    // — Validacija obaveznih polja —
     if (!first_name || !last_name || !email || !address1 || !postal_code || !city || !country) {
       return res.status(400).json({ message: "Missing required customer fields" });
     }
@@ -251,43 +311,67 @@ app.post("/reservations", async (req, res) => {
       return res.status(400).json({ message: "At least one reservation item is required" });
     }
 
-    const accessCode = randomCode(8);
-    const promoCode = randomCode(6);
-
     const client = await pool.connect();
-
     try {
       await client.query("BEGIN");
 
-      // 1) Insert reservation header
+      // — Promo kod validacija —
+      let promoDiscount = false;
+      let promoReservationId: number | null = null;
+
+      if (promo_code_used) {
+        const promoRes = await client.query(
+          `SELECT id, status, promo_code_used
+           FROM reservations
+           WHERE promo_code = $1`,
+          [promo_code_used.toUpperCase()]
+        );
+
+        if (promoRes.rows.length === 0) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({ message: "Promo kod nije pronađen" });
+        }
+
+        const promoRow = promoRes.rows[0];
+
+        if (promoRow.status === "cancelled") {
+          await client.query("ROLLBACK");
+          return res.status(400).json({ message: "Promo kod otkazane rezervacije nije važeći" });
+        }
+
+        if (promoRow.promo_code_used) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({ message: "Promo kod je već iskorišćen" });
+        }
+
+        promoDiscount = true;
+        promoReservationId = promoRow.id;
+      }
+
+      // — Provjera popusta 10% iz settings —
+      const settingsRes = await client.query("SELECT discount_until FROM settings LIMIT 1");
+      const discountUntil = settingsRes.rows[0]?.discount_until ?? null;
+      const tenPctActive = isDiscountActive(discountUntil);
+
+      // — Generiši kodove —
+      const accessCode = randomCode(8);
+      const promoCode = randomCode(6);
+
+      // — Insert rezervacije —
       const ins = await client.query(
-        `
-        INSERT INTO reservations
+        `INSERT INTO reservations
           (first_name, last_name, email, phone, address1, postal_code, city, country,
            access_code, promo_code, currency)
-        VALUES
-          ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-        RETURNING *
-        `,
-        [
-          first_name,
-          last_name,
-          email,
-          phone ?? null,
-          address1,
-          postal_code,
-          city,
-          country,
-          accessCode,
-          promoCode,
-          currency ?? "RSD"
-        ]
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         RETURNING *`,
+        [first_name, last_name, email, phone ?? null,
+         address1, postal_code, city, country,
+         accessCode, promoCode, currency ?? "RSD"]
       );
-
       const reservation = ins.rows[0];
 
-      // 2) Insert items + calculate total from services.price_rsd
-      let total = 0;
+      // — Insert stavki + izračun cene —
+      let subtotal = 0;
 
       for (const it of items) {
         const { service_id, date, time } = it;
@@ -301,33 +385,52 @@ app.post("/reservations", async (req, res) => {
           "SELECT id, price_rsd FROM services WHERE id = $1",
           [service_id]
         );
-
         if (svc.rows.length === 0) {
           await client.query("ROLLBACK");
           return res.status(400).json({ message: `Service ${service_id} not found` });
         }
 
         const unitPrice = Number(svc.rows[0].price_rsd);
-        const lineTotal = unitPrice;
-
-        total += lineTotal;
+        subtotal += unitPrice;
 
         await client.query(
-          `
-          INSERT INTO reservation_items
+          `INSERT INTO reservation_items
             (reservation_id, service_id, date, time, unit_price, line_total)
-          VALUES
-            ($1,$2,$3,$4,$5,$6)
-          `,
-          [reservation.id, service_id, date, time, unitPrice, lineTotal]
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [reservation.id, service_id, date, time, unitPrice, unitPrice]
         );
       }
 
-      // 3) update total_amount
+      // — Primena popusta —
+      // Redosled: prvo 10% za datum, pa 5% promo (na već sniženu cenu)
+      let total = subtotal;
+      let discount10 = 0;
+      let discount5 = 0;
+
+      if (tenPctActive) {
+        discount10 = Math.round(total * 0.10);
+        total -= discount10;
+      }
+
+      if (promoDiscount) {
+        discount5 = Math.round(total * 0.05);
+        total -= discount5;
+      }
+
+      // — Update total —
       await client.query(
         "UPDATE reservations SET total_amount = $1 WHERE id = $2",
         [total, reservation.id]
       );
+
+      // — Označi promo kod kao iskorišćen —
+      if (promoReservationId !== null) {
+        await client.query(
+          "UPDATE reservations SET promo_code_used = TRUE WHERE id = $1",
+          [promoReservationId]
+        );
+        console.log(`✅ Promo kod ${promo_code_used} iskorišćen (rez. #${promoReservationId})`);
+      }
 
       await client.query("COMMIT");
 
@@ -335,9 +438,14 @@ app.post("/reservations", async (req, res) => {
         reservationId: reservation.id,
         accessCode: reservation.access_code,
         promoCode: reservation.promo_code,
+        subtotal,
+        discount10,
+        discount5,
         totalAmount: total,
+        currency: currency ?? "RSD",
         status: reservation.status
       });
+
     } catch (e) {
       await client.query("ROLLBACK");
       throw e;
@@ -347,19 +455,19 @@ app.post("/reservations", async (req, res) => {
   } catch (err: any) {
     console.error("POST /reservations error:", err?.message || err);
     return res.status(500).json({ message: "Failed to create reservation" });
-
   }
 });
 
+/* ======================
+   GET /reservations
+====================== */
 app.get("/reservations", async (_req, res) => {
   try {
     const { rows } = await pool.query(
-      `
-      SELECT id, first_name, last_name, email, total_amount, status, created_at
-      FROM reservations
-      ORDER BY created_at DESC
-      LIMIT 50
-      `
+      `SELECT id, first_name, last_name, email, total_amount, status, created_at
+       FROM reservations
+       ORDER BY created_at DESC
+       LIMIT 50`
     );
     res.json(rows);
   } catch (err: any) {
@@ -368,43 +476,104 @@ app.get("/reservations", async (_req, res) => {
   }
 });
 
+/* ======================
+   GET /reservations/:id
+====================== */
 app.get("/reservations/:id", async (req, res) => {
   try {
     const { id } = req.params;
-
-    const header = await pool.query(
-      "SELECT * FROM reservations WHERE id = $1",
-      [id]
-    );
-    if (header.rows.length === 0) {
-      return res.status(404).json({ message: "Reservation not found" });
-    }
+    const header = await pool.query("SELECT * FROM reservations WHERE id = $1", [id]);
+    if (header.rows.length === 0) return res.status(404).json({ message: "Reservation not found" });
 
     const items = await pool.query(
-      `
-      SELECT
-        ri.id,
-        ri.service_id,
-        s.name as service_name,
-        ri.date,
-        ri.time,
-        ri.unit_price,
-        ri.line_total
-      FROM reservation_items ri
-      JOIN services s ON s.id = ri.service_id
-      WHERE ri.reservation_id = $1
-      ORDER BY ri.date, ri.time
-      `,
+      `SELECT ri.id, ri.service_id, s.name as service_name,
+              ri.date, ri.time, ri.unit_price, ri.line_total
+       FROM reservation_items ri
+       JOIN services s ON s.id = ri.service_id
+       WHERE ri.reservation_id = $1
+       ORDER BY ri.date, ri.time`,
       [id]
     );
 
-    res.json({
-      reservation: header.rows[0],
-      items: items.rows
-    });
+    res.json({ reservation: header.rows[0], items: items.rows });
   } catch (err: any) {
     console.error("GET /reservations/:id error:", err?.message || err);
     res.status(500).json({ message: "Failed to load reservation" });
+  }
+});
+
+/* ======================
+   POST /reservations/lookup
+   (pronađi rezervaciju po šifri + email)
+====================== */
+app.post("/reservations/lookup", async (req, res) => {
+  try {
+    const { access_code, email } = req.body;
+    if (!access_code || !email) {
+      return res.status(400).json({ message: "access_code and email are required" });
+    }
+
+    const header = await pool.query(
+      "SELECT * FROM reservations WHERE access_code = $1 AND email = $2",
+      [access_code.toUpperCase(), email.toLowerCase()]
+    );
+    if (header.rows.length === 0) {
+      return res.status(404).json({ message: "Rezervacija nije pronađena" });
+    }
+
+    const items = await pool.query(
+      `SELECT ri.id, ri.service_id, s.name as service_name,
+              ri.date, ri.time, ri.unit_price, ri.line_total
+       FROM reservation_items ri
+       JOIN services s ON s.id = ri.service_id
+       WHERE ri.reservation_id = $1
+       ORDER BY ri.date, ri.time`,
+      [header.rows[0].id]
+    );
+
+    res.json({ reservation: header.rows[0], items: items.rows });
+  } catch (err: any) {
+    console.error("POST /reservations/lookup error:", err?.message || err);
+    res.status(500).json({ message: "Failed to lookup reservation" });
+  }
+});
+
+/* ======================
+   POST /reservations/:id/cancel
+====================== */
+app.post("/reservations/:id/cancel", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { access_code, email } = req.body;
+
+    if (!access_code || !email) {
+      return res.status(400).json({ message: "access_code and email are required" });
+    }
+
+    const found = await pool.query(
+      "SELECT * FROM reservations WHERE id = $1 AND access_code = $2 AND email = $3",
+      [id, access_code.toUpperCase(), email.toLowerCase()]
+    );
+    if (found.rows.length === 0) {
+      return res.status(404).json({ message: "Rezervacija nije pronađena ili pogrešni podaci" });
+    }
+
+    const reservation = found.rows[0];
+    if (reservation.status === "cancelled") {
+      return res.status(400).json({ message: "Rezervacija je već otkazana" });
+    }
+
+    await pool.query(
+      "UPDATE reservations SET status = 'cancelled' WHERE id = $1",
+      [id]
+    );
+
+    console.log(`🚫 Rezervacija #${id} otkazana`);
+
+    res.json({ message: "Rezervacija je uspešno otkazana", reservationId: Number(id) });
+  } catch (err: any) {
+    console.error("POST /reservations/:id/cancel error:", err?.message || err);
+    res.status(500).json({ message: "Failed to cancel reservation" });
   }
 });
 
