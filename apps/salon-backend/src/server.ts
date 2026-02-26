@@ -500,7 +500,7 @@ app.post("/reservations", async (req, res) => {
 
       if (promo_code_used) {
         const promoRes = await client.query(
-          "SELECT id, status, promo_code_used FROM reservations WHERE promo_code = $1",
+          "SELECT id, email, status, promo_code_used FROM reservations WHERE promo_code = $1",
           [promo_code_used.toUpperCase()]
         );
         if (promoRes.rows.length === 0) {
@@ -515,6 +515,11 @@ app.post("/reservations", async (req, res) => {
         if (promoRow.promo_code_used) {
           await client.query("ROLLBACK");
           return res.status(400).json({ message: "Promo kod je već iskorišćen" });
+        }
+        // Promo kod može koristiti samo vlasnik — email mora odgovarati
+        if (promoRow.email.toLowerCase() !== email.toLowerCase()) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({ message: "Ovaj promo kod nije namenjen ovom email-u" });
         }
         promoDiscount = true;
         promoReservationId = promoRow.id;
@@ -593,6 +598,31 @@ app.get("/reservations", async (_req, res) => {
   }
 });
 
+app.get("/reservations/slots", async (req, res) => {
+  try {
+    const { service_id, date } = req.query;
+    if (!service_id || !date) {
+      return res.status(400).json({ message: "service_id and date required" });
+    }
+    const { rows } = await pool.query(
+      `SELECT ri.time, COUNT(*) as count
+       FROM reservation_items ri
+       JOIN reservations r ON r.id = ri.reservation_id
+       WHERE ri.service_id = $1 AND ri.date::date = $2::date AND r.status != 'cancelled'
+       GROUP BY ri.time`,
+      [service_id, date]
+    );
+    const result: Record<string, number> = {};
+    for (const row of rows) {
+      result[row.time.slice(0, 5)] = Number(row.count);
+    }
+    res.json(result);
+  } catch (err: any) {
+    console.error("GET /reservations/slots error:", err?.message);
+    res.status(500).json({ message: "Failed to load slots" });
+  }
+});
+
 app.get("/reservations/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -633,6 +663,91 @@ app.post("/reservations/lookup", async (req, res) => {
   }
 });
 
+app.post("/reservations/:id/items", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { access_code, email, service_id, date, time } = req.body;
+    if (!access_code || !email || !service_id || !date || !time) {
+      return res.status(400).json({ message: "access_code, email, service_id, date, time su obavezni" });
+    }
+    const found = await pool.query(
+      "SELECT * FROM reservations WHERE id=$1 AND access_code=$2 AND email=$3",
+      [id, access_code.toUpperCase(), email.toLowerCase()]
+    );
+    if (found.rows.length === 0) return res.status(404).json({ message: "Rezervacija nije pronađena" });
+    if (found.rows[0].status === "cancelled") return res.status(400).json({ message: "Otkazana rezervacija se ne može menjati" });
+
+    const svc = await pool.query("SELECT * FROM services WHERE id=$1", [service_id]);
+    if (svc.rows.length === 0) return res.status(404).json({ message: "Usluga nije pronađena" });
+
+    // Proveri kapacitet
+    const taken = await pool.query(
+      `SELECT COUNT(*) as cnt FROM reservation_items ri
+       JOIN reservations r ON r.id=ri.reservation_id
+       WHERE ri.service_id=$1 AND ri.date::date=$2::date AND ri.time=$3 AND r.status!='cancelled'`,
+      [service_id, date, time]
+    );
+    if (Number(taken.rows[0].cnt) >= svc.rows[0].max_clients) {
+      return res.status(400).json({ message: "Termin je popunjen" });
+    }
+
+    const unitPrice = Number(svc.rows[0].price_rsd);
+
+    // Proveri da li je 10% popust aktivan
+    const settings = await pool.query("SELECT discount_until FROM settings LIMIT 1");
+    const tenPct = isDiscountActive(settings.rows[0]?.discount_until ?? null);
+    const lineTotal = tenPct ? Math.round(unitPrice * 0.90) : unitPrice;
+
+    const ins = await pool.query(
+      "INSERT INTO reservation_items (reservation_id,service_id,date,time,unit_price,line_total) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *",
+      [id, service_id, date, time, unitPrice, lineTotal]
+    );
+    // Ažuriraj ukupni iznos
+    const newTotal = Number(found.rows[0].total_amount) + lineTotal;
+    await pool.query("UPDATE reservations SET total_amount=$1 WHERE id=$2", [newTotal, id]);
+
+    res.status(201).json({
+      item: { ...ins.rows[0], service_name: svc.rows[0].name },
+      total_amount: newTotal,
+    });
+  } catch (err: any) {
+    console.error("POST /reservations/:id/items error:", err?.message);
+    res.status(500).json({ message: "Greška pri dodavanju usluge" });
+  }
+});
+
+app.delete("/reservations/:id/items/:itemId", async (req, res) => {
+  try {
+    const { id, itemId } = req.params;
+    const { access_code, email } = req.body;
+    if (!access_code || !email) return res.status(400).json({ message: "access_code i email su obavezni" });
+
+    const found = await pool.query(
+      "SELECT * FROM reservations WHERE id=$1 AND access_code=$2 AND email=$3",
+      [id, access_code.toUpperCase(), email.toLowerCase()]
+    );
+    if (found.rows.length === 0) return res.status(404).json({ message: "Rezervacija nije pronađena" });
+    if (found.rows[0].status === "cancelled") return res.status(400).json({ message: "Otkazana rezervacija se ne može menjati" });
+
+    const item = await pool.query(
+      "SELECT * FROM reservation_items WHERE id=$1 AND reservation_id=$2",
+      [itemId, id]
+    );
+    if (item.rows.length === 0) return res.status(404).json({ message: "Stavka nije pronađena" });
+
+    await pool.query("DELETE FROM reservation_items WHERE id=$1", [itemId]);
+
+    // Ažuriraj ukupni iznos
+    const newTotal = Math.max(0, Number(found.rows[0].total_amount) - Number(item.rows[0].line_total));
+    await pool.query("UPDATE reservations SET total_amount=$1 WHERE id=$2", [newTotal, id]);
+
+    res.json({ message: "Usluga uklonjena", total_amount: newTotal });
+  } catch (err: any) {
+    console.error("DELETE /reservations/:id/items/:itemId error:", err?.message);
+    res.status(500).json({ message: "Greška pri uklanjanju usluge" });
+  }
+});
+
 app.post("/reservations/:id/cancel", async (req, res) => {
   try {
     const { id } = req.params;
@@ -649,30 +764,6 @@ app.post("/reservations/:id/cancel", async (req, res) => {
   } catch (err: any) {
     console.error("POST /reservations/:id/cancel error:", err?.message);
     res.status(500).json({ message: "Failed to cancel reservation" });
-  }
-});
-app.get("/reservations/slots", async (req, res) => {
-  try {
-    const { service_id, date } = req.query;
-    if (!service_id || !date) {
-      return res.status(400).json({ message: "service_id and date required" });
-    }
-    const { rows } = await pool.query(
-      `SELECT time, COUNT(*) as count
-       FROM reservation_items ri
-       JOIN reservations r ON r.id = ri.reservation_id
-       WHERE ri.service_id = $1 AND ri.date = $2 AND r.status != 'cancelled'
-       GROUP BY time`,
-      [service_id, date]
-    );
-    const result: Record<string, number> = {};
-    for (const row of rows) {
-      result[row.time.slice(0, 5)] = Number(row.count);
-    }
-    res.json(result);
-  } catch (err: any) {
-    console.error("GET /reservations/slots error:", err?.message);
-    res.status(500).json({ message: "Failed to load slots" });
   }
 });
 /* ======================

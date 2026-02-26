@@ -508,7 +508,125 @@ function SettingsPanel() {
   );
 }
 
-// ─── REZERVACIJE ─────────────────────────────────────────────────────────────
+interface ReservationItem {
+  id: number;
+  service_name: string;
+  date: string;
+  time: string;
+  unit_price: number;
+  line_total: number;
+}
+
+function ReservationRow({ r, index }: { r: Reservation; index: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const [items, setItems] = useState<ReservationItem[] | null>(null);
+  const [loadingItems, setLoadingItems] = useState(false);
+
+  async function toggleExpand() {
+    if (!expanded && items === null) {
+      setLoadingItems(true);
+      try {
+        const res = await fetch(`${API}/reservations/${r.id}`);
+        const data = await res.json();
+        setItems(data.items ?? []);
+      } catch {
+        setItems([]);
+      } finally {
+        setLoadingItems(false);
+      }
+    }
+    setExpanded((v) => !v);
+  }
+
+  return (
+    <div style={{
+      background: "rgba(255,255,255,0.65)", borderRadius: "16px",
+      border: `1.5px solid ${expanded ? "rgba(255,61,138,0.35)" : "rgba(255,61,138,0.15)"}`,
+      overflow: "hidden", transition: "border-color 0.2s",
+    }}>
+      {/* Glavni red */}
+      <div style={{
+        padding: "0.85rem 1.1rem",
+        display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap",
+      }}>
+        <div style={{
+          width: "36px", height: "36px", borderRadius: "12px", flexShrink: 0,
+          background: "rgba(255,61,138,0.10)", display: "flex", alignItems: "center",
+          justifyContent: "center", fontSize: "0.78rem", fontWeight: 800, color: "#f01f72",
+        }}>
+          {index + 1}
+        </div>
+        <div style={{ flex: 1, minWidth: "160px" }}>
+          <div style={{ fontWeight: 700, fontSize: "0.92rem", color: "#1a0a10" }}>{r.first_name} {r.last_name}</div>
+          <div style={{ fontSize: "0.78rem", color: "#6b2145", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>{r.email}</div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontWeight: 800, fontSize: "0.92rem", color: "#1a0a10" }}>{Number(r.total_amount).toLocaleString()} RSD</div>
+          <div style={{ fontSize: "0.75rem", color: "#9ca3af", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+            {new Date(r.created_at).toLocaleDateString("sr-RS")}
+          </div>
+        </div>
+        <StatusBadge status={r.status} />
+        <button
+          onClick={toggleExpand}
+          style={{
+            background: expanded ? "linear-gradient(135deg,#ff3d8a,#f01f72)" : "rgba(255,61,138,0.08)",
+            border: `1.5px solid ${expanded ? "transparent" : "rgba(255,61,138,0.25)"}`,
+            borderRadius: "10px", padding: "0.4rem 0.75rem",
+            fontSize: "0.78rem", fontWeight: 700, cursor: "pointer",
+            color: expanded ? "white" : "#f01f72",
+            transition: "all 0.2s", flexShrink: 0,
+            fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif",
+          }}
+        >
+          {loadingItems ? "…" : expanded ? "▲ Sakrij" : "▼ Više info"}
+        </button>
+      </div>
+
+      {/* Expandovani detalji */}
+      {expanded && (
+        <div style={{
+          borderTop: "1.5px solid rgba(255,61,138,0.12)",
+          padding: "1rem 1.1rem",
+          background: "rgba(255,61,138,0.03)",
+        }}>
+          {loadingItems && <p style={{ fontSize: "0.82rem", color: "#6b2145" }}>Učitavanje usluga…</p>}
+          {!loadingItems && items && items.length === 0 && (
+            <p style={{ fontSize: "0.82rem", color: "#9ca3af" }}>Nema usluga za ovu rezervaciju.</p>
+          )}
+          {!loadingItems && items && items.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              <div style={{ fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#f01f72", marginBottom: "0.25rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+                Zakazane usluge
+              </div>
+              {items.map((item) => (
+                <div key={item.id} style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  background: "rgba(255,255,255,0.70)", borderRadius: "12px",
+                  padding: "0.6rem 0.9rem", gap: "1rem", flexWrap: "wrap",
+                  border: "1.5px solid rgba(255,61,138,0.10)",
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: "0.88rem", color: "#1a0a10" }}>{item.service_name}</div>
+                    <div style={{ fontSize: "0.75rem", color: "#6b2145", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+                      📅 {new Date(item.date.slice(0, 10) + "T00:00:00").toLocaleDateString("sr-RS", { day: "2-digit", month: "2-digit", year: "numeric" })} &nbsp;⏰ {item.time.slice(0, 5)}
+                    </div>
+                  </div>
+                  <div style={{ fontWeight: 800, fontSize: "0.88rem", color: "#1a0a10", flexShrink: 0 }}>
+                    {Number(item.line_total).toLocaleString()} RSD
+                  </div>
+                </div>
+              ))}
+              <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: "0.25rem", fontSize: "0.82rem", color: "#6b2145", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+                Ukupno naplaćeno: <strong style={{ marginLeft: "0.4rem", color: "#1a0a10" }}>{Number(r.total_amount).toLocaleString()} RSD</strong>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ReservationsPanel() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -530,48 +648,8 @@ function ReservationsPanel() {
       </div>
       {reservations.length === 0 && <p style={{ color: "#6b2145", fontSize: "0.88rem" }}>Nema rezervacija.</p>}
       <div style={{ display: "flex", flexDirection: "column", gap: "0.65rem" }}>
-        {reservations.map((r) => (
-          <div key={r.id} style={{
-            background: "rgba(255,255,255,0.65)", borderRadius: "16px",
-            border: "1.5px solid rgba(255,61,138,0.15)", padding: "0.85rem 1.1rem",
-            display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap",
-          }}>
-            <div style={{
-              width: "36px", height: "36px", borderRadius: "12px", flexShrink: 0,
-              background: "rgba(255,61,138,0.10)", display: "flex", alignItems: "center",
-              justifyContent: "center", fontSize: "0.78rem", fontWeight: 800, color: "#f01f72"
-            }}><div
-              style={{
-                width: "36px",
-                height: "36px",
-                borderRadius: "12px",
-                flexShrink: 0,
-                background: "rgba(255,61,138,0.10)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "0.78rem",
-                fontWeight: 800,
-                color: "#f01f72",
-                cursor: "help",
-                position: "relative",
-              }}
-              title={`ID: ${r.id}`}
-            >
-                {reservations.indexOf(r) + 1}
-              </div></div>
-            <div style={{ flex: 1, minWidth: "160px" }}>
-              <div style={{ fontWeight: 700, fontSize: "0.92rem", color: "#1a0a10" }}>{r.first_name} {r.last_name}</div>
-              <div style={{ fontSize: "0.78rem", color: "#6b2145", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>{r.email}</div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontWeight: 800, fontSize: "0.92rem", color: "#1a0a10" }}>{Number(r.total_amount).toLocaleString()} RSD</div>
-              <div style={{ fontSize: "0.75rem", color: "#9ca3af", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
-                {new Date(r.created_at).toLocaleDateString("sr-RS")}
-              </div>
-            </div>
-            <StatusBadge status={r.status} />
-          </div>
+        {reservations.map((r, i) => (
+          <ReservationRow key={r.id} r={r} index={i} />
         ))}
       </div>
     </div>
