@@ -2,23 +2,231 @@
 @tailwind components;
 @tailwind utilities;
 
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800;900&display=swap');
+
 :root {
   --ring: rgba(255, 61, 138, 0.35);
-}
-
-body {
-  font-family: "Poppins", system-ui, sans-serif;
-  color: #0f172a; /* slate-900 */
-  background:
-    radial-gradient(900px 500px at 10% 10%, rgba(255, 61, 138, 0.35), transparent 60%),
-    radial-gradient(800px 500px at 90% 20%, rgba(255, 110, 168, 0.35), transparent 55%),
-    radial-gradient(900px 600px at 40% 95%, rgba(255, 158, 201, 0.55), transparent 60%),
-    linear-gradient(180deg, #fff0f6 0%, #ffe0ef 45%, #fff 100%);
-  min-height: 100vh;
-  margin: 0;
+  --blush-50: #fff0f6;
+  --blush-100: #ffe0ef;
+  --blush-200: #ffc2df;
+  --blush-400: #ff6ea8;
+  --blush-500: #ff3d8a;
+  --blush-600: #f01f72;
 }
 
 * {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  box-sizing: border-box;
 }
+
+body {
+  font-family: "Poppins", system-ui, sans-serif;
+  color: #0f172a;
+  background:
+    radial-gradient(900px 500px at 10% 10%, rgba(255, 61, 138, 0.22), transparent 60%),
+    radial-gradient(800px 500px at 90% 20%, rgba(255, 110, 168, 0.22), transparent 55%),
+    radial-gradient(900px 600px at 40% 95%, rgba(255, 158, 201, 0.35), transparent 60%),
+    linear-gradient(180deg, #fff0f6 0%, #ffe0ef 45%, #fff 100%);
+  min-height: 100vh;
+  margin: 0;
+}
+
+/* Navbar glassmorphism */
+.navbar-glass {
+  background: rgba(255, 240, 246, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255, 180, 220, 0.35);
+  box-shadow: 0 4px 24px rgba(255, 61, 138, 0.08);
+}
+
+/* Salon name font */
+.salon-name {
+  font-family: "Copperplate", "Copperplate Gothic Bold", "Papyrus", serif;
+  letter-spacing: 0.04em;
+}
+
+/* Nav link */
+.nav-link {
+  position: relative;
+  font-family: "Helvetica Neue", "Helvetica", Arial, sans-serif;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #6b2145;
+  padding: 0.45rem 1.1rem;
+  border-radius: 999px;
+  border: 1.5px solid transparent;
+  transition: all 0.2s ease;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.nav-link:hover {
+  background: rgba(255, 61, 138, 0.10);
+  border-color: rgba(255, 61, 138, 0.30);
+  color: #f01f72;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(255, 61, 138, 0.18);
+}
+
+.nav-link.active {
+  background: rgba(255, 61, 138, 0.13);
+  border-color: rgba(255, 61, 138, 0.35);
+  color: #f01f72;
+  font-weight: 600;
+}
+
+/* Card */
+.pink-card {
+  background: rgba(255, 240, 246, 0.80);
+  border: 1.5px solid rgba(255, 180, 220, 0.50);
+  border-radius: 24px;
+  box-shadow: 0 8px 32px rgba(255, 61, 138, 0.10), 0 2px 8px rgba(0,0,0,0.04);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Primary button */
+.btn-primary {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  font-size: 0.95rem;
+  padding: 0.75rem 2rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ff3d8a 0%, #f01f72 100%);
+  color: white;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(255, 61, 138, 0.35);
+  transition: all 0.2s ease;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 32px rgba(255, 61, 138, 0.45);
+  background: linear-gradient(135deg, #ff5fa0 0%, #ff3d8a 100%);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+/* Secondary button */
+.btn-secondary {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 0.7rem 1.8rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.80);
+  color: #6b2145;
+  border: 1.5px solid rgba(255, 61, 138, 0.30);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.btn-secondary:hover {
+  background: white;
+  border-color: rgba(255, 61, 138, 0.55);
+  color: #f01f72;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(255, 61, 138, 0.18);
+}
+
+/* Section heading */
+.section-label {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #f01f72;
+}
+
+/* Hamburger */
+.hamburger {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 12px;
+  background: transparent;
+  border: none;
+  transition: background 0.2s;
+}
+
+.hamburger:hover {
+  background: rgba(255, 61, 138, 0.10);
+}
+
+.hamburger span {
+  display: block;
+  width: 22px;
+  height: 2px;
+  background: #6b2145;
+  border-radius: 2px;
+  transition: all 0.3s ease;
+}
+
+.hamburger.open span:nth-child(1) {
+  transform: translateY(7px) rotate(45deg);
+}
+.hamburger.open span:nth-child(2) {
+  opacity: 0;
+}
+.hamburger.open span:nth-child(3) {
+  transform: translateY(-7px) rotate(-45deg);
+}
+
+/* Mobile menu */
+.mobile-menu {
+  position: fixed;
+  top: 68px;
+  left: 0;
+  right: 0;
+  background: rgba(255, 240, 246, 0.97);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255, 180, 220, 0.35);
+  padding: 1rem 1.5rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  z-index: 99;
+  transform: translateY(-10px);
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.25s ease;
+}
+
+.mobile-menu.open {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: all;
+}
+
+/* Animations */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.fade-up {
+  animation: fadeUp 0.5s ease forwards;
+}
+
+.fade-up-1 { animation-delay: 0.05s; opacity: 0; }
+.fade-up-2 { animation-delay: 0.15s; opacity: 0; }
+.fade-up-3 { animation-delay: 0.25s; opacity: 0; }
+.fade-up-4 { animation-delay: 0.35s; opacity: 0; }

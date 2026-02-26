@@ -11,6 +11,9 @@ interface Service {
   name: string;
   duration_minutes: number;
   price_rsd: number;
+  max_clients: number;
+  slot_start: string;
+  slot_end: string;
 }
 
 interface Category {
@@ -41,11 +44,13 @@ interface BookingResult {
   accessCode: string;
   promoCode: string;
   totalAmount: number;
+  subtotal: number;
+  discount10: number;
+  discount5: number;
+  currency: string;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-const CURRENCIES = ["RSD", "EUR", "USD", "GBP"];
 
 function generateTimeSlots(start = "09:00", end = "18:00", step = 30): string[] {
   const slots: string[] = [];
@@ -62,10 +67,31 @@ function generateTimeSlots(start = "09:00", end = "18:00", step = 30): string[] 
   return slots;
 }
 
-const TIME_SLOTS = generateTimeSlots();
-
 function todayStr() {
   return new Date().toISOString().split("T")[0];
+}
+
+// Učitaj zauzete termine za uslugu na određeni datum
+async function fetchTakenSlots(serviceId: number, date: string): Promise<Record<string, number>> {
+  try {
+    const r = await fetch(`${API}/reservations/slots?service_id=${serviceId}&date=${date}`);
+    if (!r.ok) return {};
+    return await r.json(); // { "10:00": 2, "11:00": 1 }
+  } catch {
+    return {};
+  }
+}
+
+// Kurs valute prema RSD
+async function fetchExchangeRate(currency: string): Promise<number> {
+  if (currency === "RSD") return 1;
+  try {
+    const r = await fetch(`https://api.frankfurter.app/latest?from=RSD&to=${currency}`);
+    const data = await r.json();
+    return data.rates?.[currency] ?? 1;
+  } catch {
+    return 1;
+  }
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
@@ -73,25 +99,34 @@ function todayStr() {
 function StepIndicator({ step }: { step: number }) {
   const steps = ["Podaci", "Usluge", "Potvrda"];
   return (
-    <div className="flex items-center justify-center gap-2 mb-8">
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem", marginBottom: "2rem" }}>
       {steps.map((label, i) => {
         const idx = i + 1;
         const active = idx === step;
         const done = idx < step;
         return (
-          <div key={label} className="flex items-center gap-2">
-            <div
-              className={[
-                "h-8 w-8 rounded-full flex items-center justify-center text-sm font-bold transition",
-                active ? "bg-blush-500 text-white shadow-glow" : done ? "bg-blush-200 text-blush-600" : "bg-white/70 text-slate-400 border border-white/60"
-              ].join(" ")}
-            >
+          <div key={label} style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <div style={{
+              width: "32px", height: "32px", borderRadius: "50%",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: "0.85rem", fontWeight: 700, transition: "all 0.2s",
+              background: active ? "linear-gradient(135deg,#ff3d8a,#f01f72)" : done ? "rgba(255,61,138,0.15)" : "rgba(255,255,255,0.70)",
+              color: active ? "white" : done ? "#f01f72" : "#9ca3af",
+              border: active ? "none" : "1.5px solid rgba(255,61,138,0.20)",
+              boxShadow: active ? "0 4px 14px rgba(255,61,138,0.35)" : "none",
+            }}>
               {done ? "✓" : idx}
             </div>
-            <span className={["text-sm font-semibold", active ? "text-blush-600" : "text-slate-400"].join(" ")}>
+            <span style={{
+              fontSize: "0.82rem", fontWeight: 600,
+              color: active ? "#f01f72" : "#9ca3af",
+              fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif"
+            }}>
               {label}
             </span>
-            {i < steps.length - 1 && <div className="w-8 h-px bg-blush-200 mx-1" />}
+            {i < steps.length - 1 && (
+              <div style={{ width: "2rem", height: "1px", background: "rgba(255,61,138,0.20)", margin: "0 0.25rem" }} />
+            )}
           </div>
         );
       })}
@@ -100,49 +135,46 @@ function StepIndicator({ step }: { step: number }) {
 }
 
 function InputField({
-  label,
-  required,
-  ...props
+  label, required, ...props
 }: { label: string; required?: boolean } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <div>
-      <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-        {label} {required && <span className="text-blush-500">*</span>}
+      <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#f01f72", marginBottom: "0.4rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+        {label} {required && <span style={{ color: "#ff3d8a" }}>*</span>}
       </label>
       <input
         {...props}
-        className="w-full rounded-2xl bg-white/90 border border-white/60 px-4 py-3 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-4 focus:ring-[var(--ring)] shadow-soft transition"
+        style={{
+          width: "100%", borderRadius: "14px",
+          background: "rgba(255,255,255,0.90)",
+          border: "1.5px solid rgba(255,61,138,0.20)",
+          padding: "0.65rem 1rem", fontSize: "0.9rem",
+          color: "#1a0a10", outline: "none",
+          fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif",
+          boxSizing: "border-box",
+        }}
       />
     </div>
   );
 }
 
-// ─── Step 1: Customer Data ────────────────────────────────────────────────────
+// ─── Step 1 ───────────────────────────────────────────────────────────────────
 
-function Step1({
-  data,
-  onChange,
-  onNext,
-}: {
-  data: CustomerData;
-  onChange: (d: CustomerData) => void;
-  onNext: () => void;
-}) {
+function Step1({ data, onChange, onNext }: { data: CustomerData; onChange: (d: CustomerData) => void; onNext: () => void }) {
   const set = (k: keyof CustomerData) => (e: React.ChangeEvent<HTMLInputElement>) =>
     onChange({ ...data, [k]: e.target.value });
 
-  const valid =
-    data.first_name && data.last_name && data.email &&
+  const valid = data.first_name && data.last_name && data.email &&
     data.address1 && data.postal_code && data.city && data.country;
 
   return (
-    <div className="space-y-5">
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
       <div>
-        <h2 className="text-2xl font-extrabold text-slate-900">Osnovni podaci 💗</h2>
-        <p className="text-slate-600 mt-1 text-sm">Unesi svoje podatke za rezervaciju.</p>
+        <h2 style={{ fontSize: "1.6rem", fontWeight: 800, color: "#1a0a10", marginBottom: "0.3rem" }}>Osnovni podaci 💗</h2>
+        <p style={{ color: "#6b2145", fontSize: "0.88rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Unesi svoje podatke za rezervaciju.</p>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-4">
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.85rem" }}>
         <InputField label="Ime" required placeholder="Ana" value={data.first_name} onChange={set("first_name")} />
         <InputField label="Prezime" required placeholder="Jovanović" value={data.last_name} onChange={set("last_name")} />
         <InputField label="Email" required type="email" placeholder="ana@example.com" value={data.email} onChange={set("email")} />
@@ -153,31 +185,84 @@ function Step1({
         <InputField label="Država" required placeholder="Srbija" value={data.country} onChange={set("country")} />
       </div>
 
-      <Button fullWidth disabled={!valid} onClick={onNext}>
+      <button className="btn-primary" disabled={!valid} onClick={onNext} style={{ width: "100%", opacity: valid ? 1 : 0.5 }}>
         Nastavi — odaberi usluge ✨
-      </Button>
+      </button>
     </div>
   );
 }
 
-// ─── Step 2: Services & Time ──────────────────────────────────────────────────
+// ─── Step 2 ───────────────────────────────────────────────────────────────────
+
+function ServiceSlotPicker({
+  service, item, onDateChange, onTimeChange,
+}: {
+  service: Service;
+  item: SelectedItem;
+  onDateChange: (id: number, date: string) => void;
+  onTimeChange: (id: number, time: string) => void;
+}) {
+  const [takenSlots, setTakenSlots] = useState<Record<string, number>>({});
+  const [loadingSlots, setLoadingSlots] = useState(false);
+
+  const slotStart = service.slot_start?.slice(0, 5) ?? "09:00";
+  const slotEnd = service.slot_end?.slice(0, 5) ?? "18:00";
+  const timeSlots = generateTimeSlots(slotStart, slotEnd);
+
+  useEffect(() => {
+    if (!item.date) return;
+    setLoadingSlots(true);
+    fetchTakenSlots(service.id, item.date).then((slots) => {
+      setTakenSlots(slots);
+      setLoadingSlots(false);
+    });
+  }, [item.date, service.id]);
+
+  function isSlotFull(time: string) {
+    return (takenSlots[time] ?? 0) >= service.max_clients;
+  }
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.6rem", marginTop: "0.75rem" }}
+      onClick={(e) => e.stopPropagation()}>
+      <div>
+        <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "#6b2145", marginBottom: "0.3rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Datum</div>
+        <input
+          type="date" min={todayStr()} value={item.date}
+          onChange={(e) => onDateChange(service.id, e.target.value)}
+          style={{ width: "100%", borderRadius: "12px", background: "white", border: "1.5px solid rgba(255,61,138,0.20)", padding: "0.5rem 0.75rem", fontSize: "0.85rem", outline: "none", boxSizing: "border-box" }}
+        />
+      </div>
+      <div>
+        <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "#6b2145", marginBottom: "0.3rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+          Vreme {loadingSlots && <span style={{ fontWeight: 400 }}>(učitavam…)</span>}
+        </div>
+        <select
+          value={item.time}
+          onChange={(e) => onTimeChange(service.id, e.target.value)}
+          style={{ width: "100%", borderRadius: "12px", background: "white", border: "1.5px solid rgba(255,61,138,0.20)", padding: "0.5rem 0.75rem", fontSize: "0.85rem", outline: "none", boxSizing: "border-box" }}
+        >
+          <option value="">-- izaberi --</option>
+          {timeSlots.map((t) => (
+            <option key={t} value={t} disabled={isSlotFull(t)}>
+              {t}{isSlotFull(t) ? " — zauzeto" : ""}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
 
 function Step2({
-  catalog,
-  selected,
-  currency,
-  promoInput,
-  onToggleService,
-  onDateChange,
-  onTimeChange,
-  onCurrencyChange,
-  onPromoChange,
-  onBack,
-  onNext,
+  catalog, selected, currency, currencies, promoInput,
+  onToggleService, onDateChange, onTimeChange,
+  onCurrencyChange, onPromoChange, onBack, onNext,
 }: {
   catalog: Category[];
   selected: SelectedItem[];
   currency: string;
+  currencies: string[];
   promoInput: string;
   onToggleService: (svc: Service) => void;
   onDateChange: (id: number, date: string) => void;
@@ -189,74 +274,54 @@ function Step2({
 }) {
   const isSelected = (id: number) => selected.some((s) => s.service.id === id);
 
+  const canProceed = selected.length > 0 && selected.every((s) => s.date && s.time);
+
   return (
-    <div className="space-y-6">
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
       <div>
-        <h2 className="text-2xl font-extrabold text-slate-900">Odaberi usluge 💅</h2>
-        <p className="text-slate-600 mt-1 text-sm">Možeš odabrati više usluga u jednoj rezervaciji.</p>
+        <h2 style={{ fontSize: "1.6rem", fontWeight: 800, color: "#1a0a10", marginBottom: "0.3rem" }}>Odaberi usluge 💅</h2>
+        <p style={{ color: "#6b2145", fontSize: "0.88rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Klikni na uslugu da je odabereš. Možeš odabrati više.</p>
       </div>
 
-      {catalog.length === 0 && (
-        <p className="text-slate-500 text-sm">Učitavanje kataloga…</p>
-      )}
+      {catalog.length === 0 && <p style={{ color: "#6b2145", fontSize: "0.88rem" }}>Učitavanje kataloga…</p>}
 
       {catalog.map((cat) => (
         <div key={cat.id}>
-          <div className="text-xs font-bold uppercase tracking-widest text-blush-500 mb-3">{cat.name}</div>
-          <div className="grid md:grid-cols-2 gap-3">
+          <div style={{ fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#f01f72", marginBottom: "0.75rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+            {cat.name}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
             {cat.services.map((svc) => {
               const sel = isSelected(svc.id);
               const item = selected.find((s) => s.service.id === svc.id);
               return (
                 <div
                   key={svc.id}
-                  className={[
-                    "rounded-2xl border p-4 cursor-pointer transition",
-                    sel
-                      ? "border-blush-400 bg-blush-50 shadow-glow"
-                      : "border-white/60 bg-white/70 hover:border-blush-300"
-                  ].join(" ")}
                   onClick={() => onToggleService(svc)}
+                  style={{
+                    borderRadius: "18px", padding: "1rem", cursor: "pointer", transition: "all 0.2s",
+                    background: sel ? "rgba(255,61,138,0.08)" : "rgba(255,255,255,0.70)",
+                    border: `1.5px solid ${sel ? "#ff6ea8" : "rgba(255,61,138,0.18)"}`,
+                    boxShadow: sel ? "0 6px 20px rgba(255,61,138,0.18)" : "none",
+                  }}
                 >
-                  <div className="flex items-start justify-between gap-2">
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem" }}>
                     <div>
-                      <div className="font-bold text-slate-900">{svc.name}</div>
-                      <div className="text-xs text-slate-500 mt-0.5">{svc.duration_minutes} min</div>
+                      <div style={{ fontWeight: 700, fontSize: "0.92rem", color: "#1a0a10" }}>{svc.name}</div>
+                      <div style={{ fontSize: "0.75rem", color: "#6b2145", marginTop: "0.2rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+                        ⏱ {svc.duration_minutes} min · max {svc.max_clients} kl.
+                      </div>
                     </div>
-                    <div className="text-sm font-extrabold text-blush-600 whitespace-nowrap">
-                      {svc.price_rsd.toLocaleString()} RSD
+                    <div style={{ fontWeight: 800, fontSize: "0.92rem", color: "#f01f72", whiteSpace: "nowrap" }}>
+                      {Number(svc.price_rsd).toLocaleString()} RSD
                     </div>
                   </div>
 
-                  {sel && (
-                    <div
-                      className="mt-3 grid grid-cols-2 gap-2"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <div>
-                        <div className="text-xs font-semibold text-slate-600 mb-1">Datum</div>
-                        <input
-                          type="date"
-                          min={todayStr()}
-                          value={item?.date ?? ""}
-                          onChange={(e) => onDateChange(svc.id, e.target.value)}
-                          className="w-full rounded-xl bg-white border border-white/60 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-                        />
-                      </div>
-                      <div>
-                        <div className="text-xs font-semibold text-slate-600 mb-1">Vreme</div>
-                        <select
-                          value={item?.time ?? ""}
-                          onChange={(e) => onTimeChange(svc.id, e.target.value)}
-                          className="w-full rounded-xl bg-white border border-white/60 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-                        >
-                          <option value="">-- izaberi --</option>
-                          {TIME_SLOTS.map((t) => (
-                            <option key={t} value={t}>{t}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
+                  {sel && item && (
+                    <ServiceSlotPicker
+                      service={svc} item={item}
+                      onDateChange={onDateChange} onTimeChange={onTimeChange}
+                    />
                   )}
                 </div>
               );
@@ -265,59 +330,46 @@ function Step2({
         </div>
       ))}
 
-      {/* Currency & Promo */}
-      <div className="grid md:grid-cols-2 gap-4 pt-2">
+      {/* Valuta i promo */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.85rem" }}>
         <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-1.5">Valuta</label>
+          <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#f01f72", marginBottom: "0.4rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+            Valuta
+          </label>
           <select
-            value={currency}
-            onChange={(e) => onCurrencyChange(e.target.value)}
-            className="w-full rounded-2xl bg-white/90 border border-white/60 px-4 py-3 text-slate-900 focus:outline-none focus:ring-4 focus:ring-[var(--ring)] shadow-soft"
+            value={currency} onChange={(e) => onCurrencyChange(e.target.value)}
+            style={{ width: "100%", borderRadius: "14px", background: "rgba(255,255,255,0.90)", border: "1.5px solid rgba(255,61,138,0.20)", padding: "0.65rem 1rem", fontSize: "0.9rem", color: "#1a0a10", outline: "none", boxSizing: "border-box" }}
           >
-            {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            {currencies.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
         <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-            Promo kod <span className="text-slate-400 font-normal">(opciono — 5% popust)</span>
+          <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#f01f72", marginBottom: "0.4rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+            Promo kod <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>(5% popust)</span>
           </label>
           <input
             placeholder="npr. AB3XYZ"
-            value={promoInput}
-            onChange={(e) => onPromoChange(e.target.value.toUpperCase())}
-            className="w-full rounded-2xl bg-white/90 border border-white/60 px-4 py-3 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-4 focus:ring-[var(--ring)] shadow-soft"
+            value={promoInput} onChange={(e) => onPromoChange(e.target.value.toUpperCase())}
+            style={{ width: "100%", borderRadius: "14px", background: "rgba(255,255,255,0.90)", border: "1.5px solid rgba(255,61,138,0.20)", padding: "0.65rem 1rem", fontSize: "0.9rem", color: "#1a0a10", outline: "none", boxSizing: "border-box" }}
           />
         </div>
       </div>
 
-      <div className="flex gap-3 pt-2">
-        <Button variant="secondary" onClick={onBack}>← Nazad</Button>
-        <Button
-          fullWidth
-          disabled={
-            selected.length === 0 ||
-            selected.some((s) => !s.date || !s.time)
-          }
-          onClick={onNext}
-        >
+      <div style={{ display: "flex", gap: "0.75rem" }}>
+        <button className="btn-secondary" onClick={onBack}>← Nazad</button>
+        <button className="btn-primary" style={{ flex: 1, opacity: canProceed ? 1 : 0.5 }} disabled={!canProceed} onClick={onNext}>
           Nastavi — pregled ✨
-        </Button>
+        </button>
       </div>
     </div>
   );
 }
 
-// ─── Step 3: Review & Confirm ─────────────────────────────────────────────────
+// ─── Step 3 ───────────────────────────────────────────────────────────────────
 
 function Step3({
-  customer,
-  selected,
-  currency,
-  promoInput,
-  onBack,
-  onConfirm,
-  loading,
-  error,
+  customer, selected, currency, promoInput,
+  onBack, onConfirm, loading, error,
 }: {
   customer: CustomerData;
   selected: SelectedItem[];
@@ -328,113 +380,146 @@ function Step3({
   loading: boolean;
   error: string | null;
 }) {
+  const [rate, setRate] = useState<number>(1);
+  const [rateLoading, setRateLoading] = useState(false);
+
+  useEffect(() => {
+    if (currency === "RSD") { setRate(1); return; }
+    setRateLoading(true);
+    fetchExchangeRate(currency).then((r) => { setRate(r); setRateLoading(false); });
+  }, [currency]);
+
   const subtotal = selected.reduce((s, i) => s + i.service.price_rsd, 0);
-  const promoDiscount = promoInput.length >= 5 ? subtotal * 0.05 : 0;
-  const total = subtotal - promoDiscount;
+  const discount10 = 0; // backend računа, ovde samo prikazujemo
+  const promoDiscount = promoInput.length >= 5 ? Math.round(subtotal * 0.05) : 0;
+  const totalRSD = subtotal - promoDiscount;
+  const totalConverted = currency !== "RSD" ? (totalRSD * rate).toFixed(2) : null;
 
   return (
-    <div className="space-y-6">
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
       <div>
-        <h2 className="text-2xl font-extrabold text-slate-900">Pregled rezervacije 🎀</h2>
-        <p className="text-slate-600 mt-1 text-sm">Proveri detalje pre potvrde.</p>
+        <h2 style={{ fontSize: "1.6rem", fontWeight: 800, color: "#1a0a10", marginBottom: "0.3rem" }}>Pregled rezervacije 🎀</h2>
+        <p style={{ color: "#6b2145", fontSize: "0.88rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Proveri detalje pre potvrde.</p>
       </div>
 
-      {/* Customer summary */}
-      <Card className="p-5">
-        <div className="text-xs font-bold uppercase tracking-widest text-blush-500 mb-3">Podaci</div>
-        <div className="grid md:grid-cols-2 gap-x-8 gap-y-1 text-sm text-slate-700">
-          <span><span className="font-semibold">Ime:</span> {customer.first_name} {customer.last_name}</span>
-          <span><span className="font-semibold">Email:</span> {customer.email}</span>
-          <span><span className="font-semibold">Adresa:</span> {customer.address1}, {customer.postal_code} {customer.city}</span>
-          <span><span className="font-semibold">Država:</span> {customer.country}</span>
+      {/* Podaci */}
+      <div style={{ background: "rgba(255,255,255,0.65)", borderRadius: "18px", border: "1.5px solid rgba(255,61,138,0.15)", padding: "1.1rem 1.3rem" }}>
+        <div style={{ fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#f01f72", marginBottom: "0.75rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Podaci</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.4rem 2rem", fontSize: "0.88rem", color: "#1a0a10", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+          <span><b>Ime:</b> {customer.first_name} {customer.last_name}</span>
+          <span><b>Email:</b> {customer.email}</span>
+          <span><b>Adresa:</b> {customer.address1}, {customer.postal_code} {customer.city}</span>
+          <span><b>Država:</b> {customer.country}</span>
         </div>
-      </Card>
+      </div>
 
-      {/* Items */}
-      <Card className="p-5">
-        <div className="text-xs font-bold uppercase tracking-widest text-blush-500 mb-3">Usluge</div>
-        <div className="space-y-3">
+      {/* Usluge */}
+      <div style={{ background: "rgba(255,255,255,0.65)", borderRadius: "18px", border: "1.5px solid rgba(255,61,138,0.15)", padding: "1.1rem 1.3rem" }}>
+        <div style={{ fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#f01f72", marginBottom: "0.75rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Usluge</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
           {selected.map((item) => (
-            <div key={item.service.id} className="flex items-center justify-between text-sm">
+            <div key={item.service.id} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
               <div>
-                <div className="font-semibold text-slate-900">{item.service.name}</div>
-                <div className="text-slate-500">{item.date} u {item.time} · {item.service.duration_minutes} min</div>
+                <div style={{ fontWeight: 600, color: "#1a0a10" }}>{item.service.name}</div>
+                <div style={{ color: "#6b2145", fontSize: "0.78rem" }}>{item.date} u {item.time} · {item.service.duration_minutes} min</div>
               </div>
-              <div className="font-bold text-slate-800">{item.service.price_rsd.toLocaleString()} RSD</div>
+              <div style={{ fontWeight: 700, color: "#1a0a10" }}>{Number(item.service.price_rsd).toLocaleString()} RSD</div>
             </div>
           ))}
         </div>
 
-        <div className="border-t border-white/60 mt-4 pt-4 space-y-1.5 text-sm">
-          <div className="flex justify-between text-slate-600">
-            <span>Međuzbir</span>
-            <span>{subtotal.toLocaleString()} RSD</span>
+        {/* Obračun */}
+        <div style={{ borderTop: "1.5px solid rgba(255,61,138,0.12)", marginTop: "0.85rem", paddingTop: "0.85rem", display: "flex", flexDirection: "column", gap: "0.4rem", fontSize: "0.88rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", color: "#6b2145" }}>
+            <span>Međuzbir</span><span>{subtotal.toLocaleString()} RSD</span>
           </div>
           {promoDiscount > 0 && (
-            <div className="flex justify-between text-blush-600 font-semibold">
-              <span>Promo popust (5%)</span>
-              <span>− {promoDiscount.toLocaleString()} RSD</span>
+            <div style={{ display: "flex", justifyContent: "space-between", color: "#f01f72", fontWeight: 600 }}>
+              <span>Promo popust (5%)</span><span>− {promoDiscount.toLocaleString()} RSD</span>
             </div>
           )}
-          <div className="flex justify-between font-extrabold text-slate-900 text-base pt-1">
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, fontSize: "1rem", color: "#1a0a10", paddingTop: "0.25rem" }}>
             <span>Ukupno</span>
-            <span>{total.toLocaleString()} RSD {currency !== "RSD" && `(${currency})`}</span>
+            <div style={{ textAlign: "right" }}>
+              <div>{totalRSD.toLocaleString()} RSD</div>
+              {currency !== "RSD" && (
+                <div style={{ fontSize: "0.82rem", color: "#f01f72", fontWeight: 600 }}>
+                  {rateLoading ? "Učitavam kurs…" : `≈ ${totalConverted} ${currency}`}
+                </div>
+              )}
+            </div>
           </div>
+          {currency !== "RSD" && !rateLoading && (
+            <div style={{ fontSize: "0.75rem", color: "#9ca3af", textAlign: "right" }}>
+              Kurs: 1 {currency} = {(1 / rate).toFixed(2)} RSD (Frankfurter API)
+            </div>
+          )}
         </div>
-      </Card>
+      </div>
 
       {error && (
-        <div className="rounded-2xl bg-red-50 border border-red-200 text-red-700 text-sm px-5 py-3">
+        <div style={{ borderRadius: "14px", background: "#fee2e2", border: "1.5px solid #fca5a5", color: "#991b1b", padding: "0.7rem 1rem", fontSize: "0.88rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
           ⚠️ {error}
         </div>
       )}
 
-      <div className="flex gap-3">
-        <Button variant="secondary" onClick={onBack} disabled={loading}>← Nazad</Button>
-        <Button fullWidth onClick={onConfirm} disabled={loading}>
+      <div style={{ display: "flex", gap: "0.75rem" }}>
+        <button className="btn-secondary" onClick={onBack} disabled={loading}>← Nazad</button>
+        <button className="btn-primary" style={{ flex: 1 }} onClick={onConfirm} disabled={loading}>
           {loading ? "Šaljem…" : "Potvrdi rezervaciju 💗"}
-        </Button>
+        </button>
       </div>
     </div>
   );
 }
 
-// ─── Success Screen ───────────────────────────────────────────────────────────
+// ─── Success ──────────────────────────────────────────────────────────────────
 
 function SuccessScreen({ result, onNew }: { result: BookingResult; onNew: () => void }) {
   return (
-    <div className="text-center space-y-6 py-4">
-      <div className="text-6xl">🎉</div>
+    <div style={{ textAlign: "center", padding: "1rem 0", display: "flex", flexDirection: "column", gap: "1.25rem", alignItems: "center" }}>
+      <div style={{ fontSize: "4rem" }}>🎉</div>
       <div>
-        <h2 className="text-3xl font-extrabold text-slate-900">Rezervacija potvrđena!</h2>
-        <p className="text-slate-600 mt-2">Vidimo se u salonu Trač 💗</p>
+        <h2 style={{ fontSize: "1.8rem", fontWeight: 800, color: "#1a0a10", marginBottom: "0.4rem" }}>Rezervacija potvrđena!</h2>
+        <p style={{ color: "#6b2145", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Vidimo se u salonu Trač 💗</p>
       </div>
 
-      <Card className="p-6 text-left space-y-4 max-w-sm mx-auto">
+      <div style={{ background: "rgba(255,255,255,0.70)", border: "1.5px solid rgba(255,61,138,0.18)", borderRadius: "20px", padding: "1.5rem", width: "100%", maxWidth: "340px", display: "flex", flexDirection: "column", gap: "1rem", textAlign: "left" }}>
         <div>
-          <div className="text-xs font-bold uppercase tracking-widest text-blush-500 mb-1">Šifra za pristup</div>
-          <div className="text-2xl font-extrabold text-slate-900 tracking-widest">{result.accessCode}</div>
-          <div className="text-xs text-slate-500 mt-0.5">Sačuvaj ovu šifru — potrebna je za izmenu rezervacije.</div>
+          <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#f01f72", marginBottom: "0.4rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Šifra za pristup</div>
+          <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "#1a0a10", letterSpacing: "0.15em" }}>{result.accessCode}</div>
+          <div style={{ fontSize: "0.75rem", color: "#6b2145", marginTop: "0.25rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Sačuvaj ovu šifru — potrebna je za izmenu rezervacije.</div>
         </div>
 
         <div>
-          <div className="text-xs font-bold uppercase tracking-widest text-blush-500 mb-1">Tvoj promo kod</div>
-          <div className="text-xl font-extrabold text-blush-600 tracking-widest">{result.promoCode}</div>
-          <div className="text-xs text-slate-500 mt-0.5">Iskoristi ga za sledeću rezervaciju — 5% popusta!</div>
+          <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#f01f72", marginBottom: "0.4rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Tvoj promo kod</div>
+          <div style={{ fontSize: "1.3rem", fontWeight: 800, color: "#ff3d8a", letterSpacing: "0.12em" }}>{result.promoCode}</div>
+          <div style={{ fontSize: "0.75rem", color: "#6b2145", marginTop: "0.25rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Iskoristi za sledeću rezervaciju — 5% popusta!</div>
         </div>
 
-        <div className="border-t border-white/60 pt-4 flex justify-between font-bold text-slate-900">
+        <div style={{ borderTop: "1.5px solid rgba(255,61,138,0.12)", paddingTop: "0.85rem", display: "flex", justifyContent: "space-between", fontWeight: 800, color: "#1a0a10", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
           <span>Ukupno naplaćeno</span>
-          <span>{result.totalAmount.toLocaleString()} RSD</span>
+          <span>{Number(result.totalAmount).toLocaleString()} RSD</span>
         </div>
-      </Card>
 
-      <Button onClick={onNew} variant="secondary">Nova rezervacija</Button>
+        {result.discount10 > 0 && (
+          <div style={{ fontSize: "0.78rem", color: "#065f46", background: "#d1fae5", borderRadius: "10px", padding: "0.5rem 0.75rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+            ✅ Primenjen popust 10% (-{result.discount10.toLocaleString()} RSD)
+          </div>
+        )}
+        {result.discount5 > 0 && (
+          <div style={{ fontSize: "0.78rem", color: "#065f46", background: "#d1fae5", borderRadius: "10px", padding: "0.5rem 0.75rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+            ✅ Promo popust 5% (-{result.discount5.toLocaleString()} RSD)
+          </div>
+        )}
+      </div>
+
+      <button className="btn-secondary" onClick={onNew}>Nova rezervacija</button>
     </div>
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
 const emptyCustomer: CustomerData = {
   first_name: "", last_name: "", email: "", phone: "",
@@ -444,6 +529,7 @@ const emptyCustomer: CustomerData = {
 export default function Book() {
   const [step, setStep] = useState(1);
   const [catalog, setCatalog] = useState<Category[]>([]);
+  const [currencies, setCurrencies] = useState<string[]>(["RSD"]);
   const [customer, setCustomer] = useState<CustomerData>(emptyCustomer);
   const [selected, setSelected] = useState<SelectedItem[]>([]);
   const [currency, setCurrency] = useState("RSD");
@@ -453,10 +539,8 @@ export default function Book() {
   const [result, setResult] = useState<BookingResult | null>(null);
 
   useEffect(() => {
-    fetch(`${API}/catalog`)
-      .then((r) => r.json())
-      .then(setCatalog)
-      .catch(() => {});
+    fetch(`${API}/catalog`).then((r) => r.json()).then(setCatalog).catch(() => {});
+    fetch(`${API}/currencies`).then((r) => r.json()).then(setCurrencies).catch(() => {});
   }, []);
 
   function toggleService(svc: Service) {
@@ -476,29 +560,18 @@ export default function Book() {
   }
 
   async function handleConfirm() {
-    setLoading(true);
-    setError(null);
+    setLoading(true); setError(null);
     try {
       const body = {
-        ...customer,
-        currency,
+        ...customer, currency,
         promo_code_used: promoInput || undefined,
-        items: selected.map((s) => ({
-          service_id: s.service.id,
-          date: s.date,
-          time: s.time
-        }))
+        items: selected.map((s) => ({ service_id: s.service.id, date: s.date, time: s.time }))
       };
-
       const res = await fetch(`${API}/reservations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
       });
-
       const data = await res.json();
       if (!res.ok) throw new Error(data.message ?? "Greška pri rezervaciji");
-
       setResult(data);
     } catch (e: any) {
       setError(e.message ?? "Nepoznata greška");
@@ -508,61 +581,42 @@ export default function Book() {
   }
 
   function resetAll() {
-    setStep(1);
-    setCustomer(emptyCustomer);
-    setSelected([]);
-    setCurrency("RSD");
-    setPromoInput("");
-    setResult(null);
-    setError(null);
+    setStep(1); setCustomer(emptyCustomer); setSelected([]);
+    setCurrency("RSD"); setPromoInput(""); setResult(null); setError(null);
   }
 
   if (result) {
     return (
-      <div className="max-w-2xl mx-auto">
-        <Card className="p-8 md:p-10">
+      <div style={{ maxWidth: "600px", margin: "0 auto" }}>
+        <div style={{ background: "rgba(255,240,246,0.80)", border: "1.5px solid rgba(255,61,138,0.18)", borderRadius: "28px", padding: "2.5rem" }}>
           <SuccessScreen result={result} onNew={resetAll} />
-        </Card>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-2xl mx-auto">
-      <Card className="p-8 md:p-10">
+    <div style={{ maxWidth: "600px", margin: "0 auto" }}>
+      <div style={{ background: "rgba(255,240,246,0.80)", border: "1.5px solid rgba(255,61,138,0.18)", borderRadius: "28px", padding: "2rem 2.5rem" }}>
         <StepIndicator step={step} />
-
-        {step === 1 && (
-          <Step1 data={customer} onChange={setCustomer} onNext={() => setStep(2)} />
-        )}
+        {step === 1 && <Step1 data={customer} onChange={setCustomer} onNext={() => setStep(2)} />}
         {step === 2 && (
           <Step2
-            catalog={catalog}
-            selected={selected}
-            currency={currency}
-            promoInput={promoInput}
-            onToggleService={toggleService}
-            onDateChange={updateDate}
-            onTimeChange={updateTime}
-            onCurrencyChange={setCurrency}
-            onPromoChange={setPromoInput}
-            onBack={() => setStep(1)}
-            onNext={() => setStep(3)}
+            catalog={catalog} selected={selected} currency={currency}
+            currencies={currencies} promoInput={promoInput}
+            onToggleService={toggleService} onDateChange={updateDate}
+            onTimeChange={updateTime} onCurrencyChange={setCurrency}
+            onPromoChange={setPromoInput} onBack={() => setStep(1)} onNext={() => setStep(3)}
           />
         )}
         {step === 3 && (
           <Step3
-            customer={customer}
-            selected={selected}
-            currency={currency}
-            promoInput={promoInput}
-            onBack={() => setStep(2)}
-            onConfirm={handleConfirm}
-            loading={loading}
-            error={error}
+            customer={customer} selected={selected} currency={currency}
+            promoInput={promoInput} onBack={() => setStep(2)}
+            onConfirm={handleConfirm} loading={loading} error={error}
           />
         )}
-      </Card>
+      </div>
     </div>
   );
 }

@@ -1,135 +1,204 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import Button from "../components/Button";
-import Card from "../components/Card";
 
-function Badge({ text }: { text: string }) {
-  return (
-    <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/70 border border-white/60 shadow-soft">
-      <span className="h-2 w-2 rounded-full bg-blush-500" />
-      <span className="text-sm text-slate-700">{text}</span>
-    </div>
-  );
-}
+const API = "http://localhost:4000";
 
-function MiniStat({ icon, title, subtitle }: { icon: string; title: string; subtitle: string }) {
-  return (
-    <div className="flex flex-col items-center text-center gap-2">
-      <div className="h-12 w-12 rounded-2xl bg-white/75 border border-white/60 shadow-soft flex items-center justify-center text-xl">
-        {icon}
-      </div>
-      <div className="text-sm font-bold text-slate-900">{title}</div>
-      <div className="text-xs text-slate-600">{subtitle}</div>
-    </div>
-  );
-}
-
-function ServiceCard({ title, minutes, price }: { title: string; minutes: string; price: string }) {
-  return (
-    <Card className="p-6 hover:shadow-glow transition">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="text-lg font-extrabold text-slate-900">{title}</div>
-          <div className="text-sm text-slate-600 mt-1">{minutes}</div>
-        </div>
-        <div className="text-sm font-extrabold text-blush-600 whitespace-nowrap">
-          {price}
-        </div>
-      </div>
-      <div className="mt-5">
-        <Link to="/book">
-          <Button variant="secondary" className="w-full">
-            Rezerviši ✨
-          </Button>
-        </Link>
-      </div>
-    </Card>
-  );
+interface SalonSettings {
+  name: string;
+  description: string;
+  working_hours: string;
+  location?: string;
 }
 
 export default function Home() {
-  return (
-    <div className="space-y-14">
-      {/* HERO */}
-      <section className="text-center space-y-6">
-        <Badge text="Salon za kosu i nokte u Beogradu" />
+  const [settings, setSettings] = useState<SalonSettings | null>(null);
 
-        <div className="space-y-3">
-          <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight text-slate-900">
-            Mesto na kom nećeš čuti
-          </h1>
-          <div className="text-2xl md:text-3xl font-semibold text-blush-600 italic">
-            “ma ne radim ti ja to…”
-          </div>
+  useEffect(() => {
+    fetch(`${API}/settings`)
+      .then((r) => r.json())
+      .then(setSettings)
+      .catch(() => {});
+  }, []);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+
+      {/* ── SECTION 1 — HERO (svetlo roze) ── */}
+      <section style={{
+        background: "rgba(255, 240, 246, 0.60)",
+        borderRadius: "28px",
+        padding: "3rem 2.5rem",
+        textAlign: "center",
+        marginBottom: "1.5rem",
+      }} className="fade-up fade-up-1">
+
+        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium mb-5"
+          style={{
+            background: "rgba(255,255,255,0.70)",
+            border: "1.5px solid rgba(255,61,138,0.20)",
+            color: "#6b2145",
+            fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif"
+          }}>
+          <span style={{ color: "#ff3d8a" }}>✦</span>
+          Salon lepote · Beograd
+          <span style={{ color: "#ff3d8a" }}>✦</span>
         </div>
 
-        <p className="max-w-2xl mx-auto text-base md:text-lg text-slate-700 leading-relaxed">
-          Dobro došla u <span className="font-bold">Trač</span> 💗
-          Kod nas je vibe nežan, usluge su top, a rezervacija je brza.
-          Izaberi tretman i termin — završeno za minut.
+        <h1
+          className="font-black tracking-tight"
+          style={{ color: "#1a0a10", lineHeight: 1.1, fontSize: "clamp(2.8rem, 6vw, 5rem)", marginBottom: "1rem" }}
+        >
+          Dobro došla u{" "}
+          <span style={{
+            background: "linear-gradient(135deg, #ff3d8a, #f01f72)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            fontStyle: "italic"
+          }}>
+            Trač
+          </span>
+          <span style={{ WebkitTextFillColor: "initial" }}> 💗</span>
+        </h1>
+
+        <p style={{
+          color: "#5a2a3a",
+          fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif",
+          fontSize: "1.05rem",
+          maxWidth: "480px",
+          margin: "0 auto 1.8rem",
+          lineHeight: 1.7
+        }}>
+          
+          Rezerviši termin online za minut.
         </p>
 
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
-          <Link to="/book">
-            <Button>Zakaži termin 💅</Button>
+        {/* Dugmici jedan pored drugog */}
+        <div style={{ display: "flex", gap: "0.85rem", justifyContent: "center", flexWrap: "wrap" }}>
+          <Link to="/book" className="btn-primary">
+            Zakaži termin 💅
           </Link>
-
-          <Button variant="secondary" onClick={() => alert("Kasnije povezujemo Instagram 🙂")}>
-            Instagram @trac
-          </Button>
-        </div>
-
-        <div className="pt-8 grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-3xl mx-auto">
-          <MiniStat icon="☕" title="Kafa na račun kuće" subtitle="uvek" />
-          <MiniStat icon="✨" title="Dobra atmosfera" subtitle="bez stresa" />
-          <MiniStat icon="🎀" title="Profi usluga" subtitle="svaki put" />
+          <Link to="/services" className="btn-secondary">
+            Pogledaj usluge
+          </Link>
         </div>
       </section>
 
-      {/* POPULAR */}
-      <section className="space-y-6">
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-          <div>
-            <div className="text-sm font-semibold text-blush-600">Najtraženije</div>
-            <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900">
-              Popularne usluge
-            </h2>
-            <p className="text-slate-700 mt-2 max-w-xl">
-              Ovo su usluge koje se najčešće zakazuju. Sledeći korak:
-              povezujemo ove kartice sa backend <code>/catalog</code>.
-            </p>
-          </div>
+      {/* ── SECTION 2 — INFO KARTICE (tamno roze) ── */}
+      <section style={{
+        background: "rgba(255, 200, 230, 0.45)",
+        borderRadius: "28px",
+        padding: "2.5rem 2.5rem",
+        marginBottom: "1.5rem",
+      }} className="fade-up fade-up-2">
 
-          <Link to="/book">
-            <Button variant="secondary">Pogledaj sve usluge</Button>
-          </Link>
+        <div className="section-label" style={{ textAlign: "center", marginBottom: "1.5rem" }}>O salonu</div>
+
+        {/* Naziv + opis */}
+        <h2 className="font-black text-center" style={{ color: "#c0185a", fontSize: "1.9rem", marginBottom: "0.6rem" }}>
+          {settings?.name ?? "Salon Trač"}
+        </h2>
+        <p style={{
+          color: "#5a2a3a",
+          fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif",
+          textAlign: "center",
+          maxWidth: "520px",
+          margin: "0 auto 2rem",
+          fontSize: "0.95rem",
+          lineHeight: 1.7
+        }}>
+          {settings?.description ?? "Učitavanje..."}
+        </p>
+
+        {/* Tri kartice jedan pored drugog */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" }}>
+          <InfoCard icon="📍" label="Lokacija" value={settings?.location ?? "Beograd, Srbija"} />
+          <InfoCard icon="🕐" label="Radno vreme" value={settings?.working_hours ?? "Učitavanje..."} />
+          <InfoCard icon="📞" label="Kontakt" value="@trac.salon" />
         </div>
 
-        <div className="grid md:grid-cols-3 gap-6">
-          <ServiceCard title="Šišanje" minutes="45 min" price="1200 RSD" />
-          <ServiceCard title="Feniranje" minutes="30 min" price="1200 RSD" />
-          <ServiceCard title="Manikir" minutes="60 min" price="1800 RSD" />
+        {/* Dugme rezervacija */}
+        <div style={{ textAlign: "center", marginTop: "2rem" }}>
+          <Link to="/book" className="btn-primary">
+            Rezerviši online ✨
+          </Link>
         </div>
       </section>
 
-      {/* CTA STRIP */}
-      <section>
-        <Card className="p-8 md:p-10">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-            <div>
-              <div className="text-2xl md:text-3xl font-extrabold text-slate-900">
-                Spremna za glow? 💗
-              </div>
-              <div className="text-slate-700 mt-2">
-                Rezerviši termin online i dobiješ promo kod za sledeću posetu.
-              </div>
+      {/* ── SECTION 3 — MINI STATS (svetlo roze) ── */}
+      <section style={{
+        background: "rgba(255, 240, 246, 0.60)",
+        borderRadius: "28px",
+        padding: "2.5rem 2.5rem",
+      }} className="fade-up fade-up-3">
+
+        <div className="section-label" style={{ textAlign: "center", marginBottom: "1.5rem" }}>Zašto Trač?</div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" }}>
+          {[
+            { icon: "☕", title: "Kafa na račun kuće", sub: "uvek" },
+            { icon: "✨", title: "Dobra atmosfera", sub: "bez stresa" },
+            { icon: "🎀", title: "Profi usluga", sub: "svaki put" },
+          ].map((s) => (
+            <div key={s.title} style={{
+              background: "rgba(255,255,255,0.65)",
+              border: "1.5px solid rgba(255,61,138,0.18)",
+              borderRadius: "20px",
+              padding: "1.5rem 1rem",
+              textAlign: "center",
+            }}>
+              <div style={{ fontSize: "2rem", marginBottom: "0.6rem" }}>{s.icon}</div>
+              <div style={{ fontWeight: 700, fontSize: "0.9rem", color: "#1a0a10", marginBottom: "0.25rem" }}>{s.title}</div>
+              <div style={{ fontSize: "0.8rem", color: "#6b2145", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>{s.sub}</div>
             </div>
-
-            <Link to="/book">
-              <Button className="px-8">Rezerviši sada ✨</Button>
-            </Link>
-          </div>
-        </Card>
+          ))}
+        </div>
       </section>
+
+    </div>
+  );
+}
+
+function InfoCard({ icon, label, value }: { icon: string; label: string; value: string }) {
+  return (
+    <div style={{
+      background: "rgba(255,255,255,0.65)",
+      border: "1.5px solid rgba(255,61,138,0.18)",
+      borderRadius: "20px",
+      padding: "1.5rem 1rem",
+      textAlign: "center",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      gap: "0.5rem"
+    }}>
+      <div style={{
+        width: "44px", height: "44px",
+        borderRadius: "14px",
+        background: "rgba(255,61,138,0.10)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: "1.3rem"
+      }}>
+        {icon}
+      </div>
+      <div style={{
+        fontSize: "0.7rem",
+        fontWeight: 700,
+        letterSpacing: "0.1em",
+        textTransform: "uppercase",
+        color: "#f01f72",
+        fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif"
+      }}>
+        {label}
+      </div>
+      <div style={{
+        fontSize: "0.88rem",
+        fontWeight: 600,
+        color: "#1a0a10",
+        fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif",
+        lineHeight: 1.4
+      }}>
+        {value}
+      </div>
     </div>
   );
 }

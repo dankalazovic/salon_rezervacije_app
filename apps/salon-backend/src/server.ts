@@ -23,24 +23,33 @@ app.use(express.json());
 const swaggerSpec = swaggerJsdoc({
   definition: {
     openapi: "3.0.0",
-    info: {
-      title: "Salon API",
-      version: "1.0.0",
-      description: "Salon reservation backend API"
-    },
+    info: { title: "Salon API", version: "1.0.0", description: "Salon reservation backend API" },
     servers: [{ url: `http://localhost:${PORT}` }],
     paths: {
-      "/health": {
-        get: {
-          summary: "Health check",
-          responses: { "200": { description: "OK" } }
+      "/health": { get: { summary: "Health check", responses: { "200": { description: "OK" } } } },
+      "/login": {
+        post: {
+          summary: "Admin login",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    username: { type: "string", example: "admin" },
+                    password: { type: "string", example: "admin" }
+                  },
+                  required: ["username", "password"]
+                }
+              }
+            }
+          },
+          responses: { "200": { description: "Login OK" }, "401": { description: "Invalid credentials" } }
         }
       },
       "/settings": {
-        get: {
-          summary: "Get salon settings",
-          responses: { "200": { description: "Settings object" } }
-        },
+        get: { summary: "Get salon settings", responses: { "200": { description: "Settings object" } } },
         put: {
           summary: "Update salon settings",
           requestBody: {
@@ -50,30 +59,109 @@ const swaggerSpec = swaggerJsdoc({
                 schema: {
                   type: "object",
                   properties: {
-                    name: { type: "string", example: "Trač" },
-                    description: { type: "string", example: "Opis salona" },
-                    working_hours: { type: "string", example: "Mon-Fri 09-17" },
-                    discount_until: { type: "string", example: "2026-12-31", description: "Datum do kada važi 10% popust" }
-                  },
-                  required: ["name", "description", "working_hours"]
+                    name: { type: "string" },
+                    description: { type: "string" },
+                    working_hours: { type: "string" },
+                    discount_until: { type: "string", example: "2026-12-31" }
+                  }
                 }
               }
             }
           },
-          responses: { "200": { description: "Updated settings" } }
+          responses: { "200": { description: "Updated" } }
         }
       },
-      "/catalog": {
-        get: {
-          summary: "Get catalog (categories + services)",
-          responses: { "200": { description: "Catalog list" } }
+      "/catalog": { get: { summary: "Get catalog (categories + services)", responses: { "200": { description: "Catalog" } } } },
+      "/categories": {
+        get: { summary: "List categories", responses: { "200": { description: "Categories" } } },
+        post: {
+          summary: "Create category",
+          requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] } } } },
+          responses: { "201": { description: "Created" } }
+        }
+      },
+      "/categories/{id}": {
+        put: {
+          summary: "Rename category",
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] } } } },
+          responses: { "200": { description: "Updated" } }
+        },
+        delete: {
+          summary: "Delete category",
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          responses: { "200": { description: "Deleted" } }
+        }
+      },
+      "/services": {
+        post: {
+          summary: "Create service",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    category_id: { type: "integer" },
+                    name: { type: "string" },
+                    description: { type: "string" },
+                    duration_minutes: { type: "integer" },
+                    price_rsd: { type: "number" },
+                    max_clients: { type: "integer" },
+                    slot_start: { type: "string", example: "09:00" },
+                    slot_end: { type: "string", example: "18:00" }
+                  },
+                  required: ["category_id", "name", "duration_minutes", "price_rsd"]
+                }
+              }
+            }
+          },
+          responses: { "201": { description: "Created" } }
+        }
+      },
+      "/services/{id}": {
+        put: {
+          summary: "Update service",
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    category_id: { type: "integer" },
+                    name: { type: "string" },
+                    description: { type: "string" },
+                    duration_minutes: { type: "integer" },
+                    price_rsd: { type: "number" },
+                    max_clients: { type: "integer" },
+                    slot_start: { type: "string" },
+                    slot_end: { type: "string" }
+                  }
+                }
+              }
+            }
+          },
+          responses: { "200": { description: "Updated" } }
+        },
+        delete: {
+          summary: "Delete service",
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          responses: { "200": { description: "Deleted" } }
+        }
+      },
+      "/currencies": {
+        get: { summary: "List allowed currencies", responses: { "200": { description: "Currencies" } } },
+        put: {
+          summary: "Set allowed currencies",
+          requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { codes: { type: "array", items: { type: "string" } } }, required: ["codes"] } } } },
+          responses: { "200": { description: "Updated" } }
         }
       },
       "/reservations": {
-        get: {
-          summary: "List reservations (admin)",
-          responses: { "200": { description: "List of reservations" } }
-        },
+        get: { summary: "List reservations (admin)", responses: { "200": { description: "List" } } },
         post: {
           summary: "Create reservation",
           requestBody: {
@@ -83,99 +171,33 @@ const swaggerSpec = swaggerJsdoc({
                 schema: {
                   type: "object",
                   properties: {
-                    first_name: { type: "string" },
-                    last_name: { type: "string" },
-                    email: { type: "string" },
-                    phone: { type: "string" },
-                    address1: { type: "string" },
-                    postal_code: { type: "string" },
-                    city: { type: "string" },
-                    country: { type: "string" },
-                    currency: { type: "string", example: "RSD" },
-                    promo_code_used: { type: "string", example: "AB3XYZ", description: "Opcioni promo kod za 5% popusta" },
-                    items: {
-                      type: "array",
-                      items: {
-                        type: "object",
-                        properties: {
-                          service_id: { type: "integer" },
-                          date: { type: "string", example: "2026-02-10" },
-                          time: { type: "string", example: "10:00" }
-                        },
-                        required: ["service_id", "date", "time"]
-                      }
-                    }
-                  },
-                  required: ["first_name", "last_name", "email", "address1", "postal_code", "city", "country", "items"]
+                    first_name: { type: "string" }, last_name: { type: "string" },
+                    email: { type: "string" }, phone: { type: "string" },
+                    address1: { type: "string" }, postal_code: { type: "string" },
+                    city: { type: "string" }, country: { type: "string" },
+                    currency: { type: "string" }, promo_code_used: { type: "string" },
+                    items: { type: "array", items: { type: "object", properties: { service_id: { type: "integer" }, date: { type: "string" }, time: { type: "string" } } } }
+                  }
                 }
               }
             }
           },
-          responses: {
-            "201": { description: "Created reservation" },
-            "400": { description: "Validation error" },
-            "500": { description: "Server error" }
-          }
-        }
-      },
-      "/reservations/{id}": {
-        get: {
-          summary: "Get single reservation by ID",
-          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
-          responses: {
-            "200": { description: "Reservation details" },
-            "404": { description: "Not found" }
-          }
+          responses: { "201": { description: "Created" }, "400": { description: "Error" } }
         }
       },
       "/reservations/lookup": {
         post: {
-          summary: "Lookup reservation by access code + email (za izmenu/otkazivanje)",
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    access_code: { type: "string" },
-                    email: { type: "string" }
-                  },
-                  required: ["access_code", "email"]
-                }
-              }
-            }
-          },
-          responses: {
-            "200": { description: "Reservation found" },
-            "404": { description: "Not found" }
-          }
+          summary: "Lookup reservation by access_code + email",
+          requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { access_code: { type: "string" }, email: { type: "string" } } } } } },
+          responses: { "200": { description: "Found" }, "404": { description: "Not found" } }
         }
       },
       "/reservations/{id}/cancel": {
         post: {
           summary: "Cancel reservation",
           parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    access_code: { type: "string" },
-                    email: { type: "string" }
-                  },
-                  required: ["access_code", "email"]
-                }
-              }
-            }
-          },
-          responses: {
-            "200": { description: "Cancelled" },
-            "400": { description: "Already cancelled" },
-            "404": { description: "Not found" }
-          }
+          requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { access_code: { type: "string" }, email: { type: "string" } } } } } },
+          responses: { "200": { description: "Cancelled" }, "400": { description: "Already cancelled" }, "404": { description: "Not found" } }
         }
       }
     }
@@ -190,6 +212,32 @@ app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 ====================== */
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
+});
+
+/* ======================
+   LOGIN
+====================== */
+app.post("/login", async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ message: "Username and password required" });
+    }
+
+    const { rows } = await pool.query(
+      "SELECT id, username FROM admins WHERE username = $1 AND password = $2",
+      [username, password]
+    );
+
+    if (rows.length === 0) {
+      return res.status(401).json({ message: "Pogrešno korisničko ime ili lozinka" });
+    }
+
+    res.json({ ok: true, username: rows[0].username });
+  } catch (err: any) {
+    console.error("POST /login error:", err?.message);
+    res.status(500).json({ message: "Login failed" });
+  }
 });
 
 /* ======================
@@ -214,17 +262,12 @@ app.get("/settings", async (_req, res) => {
 app.put("/settings", async (req, res) => {
   try {
     const { name, description, working_hours, discount_until } = req.body;
-
     const { rows } = await pool.query(
-      `UPDATE settings
-       SET name = $1, description = $2, working_hours = $3, discount_until = $4
-       RETURNING *`,
+      `UPDATE settings SET name=$1, description=$2, working_hours=$3, discount_until=$4 RETURNING *`,
       [name, description, working_hours, discount_until ?? null]
     );
-
     await delKey(SETTINGS_CACHE_KEY);
     console.log("🧹 settings cache invalidated");
-
     res.json(rows[0]);
   } catch {
     res.status(500).json({ message: "Failed to update settings" });
@@ -241,17 +284,18 @@ app.get("/catalog", async (_req, res) => {
   try {
     const result = await getOrSetJSON(CATALOG_CACHE_KEY, CATALOG_TTL, async () => {
       const { rows } = await pool.query(`
-        SELECT
-          c.id,
-          c.name,
+        SELECT c.id, c.name,
           COALESCE(
             json_agg(
               CASE WHEN s.id IS NULL THEN NULL ELSE
                 json_build_object(
-                  'id', s.id,
-                  'name', s.name,
+                  'id', s.id, 'name', s.name,
+                  'description', s.description,
                   'duration_minutes', s.duration_minutes,
-                  'price_rsd', s.price_rsd
+                  'price_rsd', s.price_rsd,
+                  'max_clients', s.max_clients,
+                  'slot_start', s.slot_start,
+                  'slot_end', s.slot_end
                 )
               END
             ) FILTER (WHERE s.id IS NOT NULL),
@@ -259,12 +303,10 @@ app.get("/catalog", async (_req, res) => {
           ) AS services
         FROM categories c
         LEFT JOIN services s ON s.category_id = c.id
-        GROUP BY c.id
-        ORDER BY c.id
+        GROUP BY c.id ORDER BY c.id
       `);
       return rows;
     });
-
     console.log(result.hit ? "🟢 catalog CACHE HIT" : "🟡 catalog CACHE MISS");
     res.json(result.data);
   } catch {
@@ -273,7 +315,155 @@ app.get("/catalog", async (_req, res) => {
 });
 
 /* ======================
-   HELPERS
+   CATEGORIES CRUD
+====================== */
+app.get("/categories", async (_req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM categories ORDER BY id");
+    res.json(rows);
+  } catch {
+    res.status(500).json({ message: "Failed to load categories" });
+  }
+});
+
+app.post("/categories", async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ message: "Name is required" });
+    const { rows } = await pool.query(
+      "INSERT INTO categories (name) VALUES ($1) RETURNING *",
+      [name]
+    );
+    await delKey(CATALOG_CACHE_KEY);
+    res.status(201).json(rows[0]);
+  } catch {
+    res.status(500).json({ message: "Failed to create category" });
+  }
+});
+
+app.put("/categories/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ message: "Name is required" });
+    const { rows } = await pool.query(
+      "UPDATE categories SET name=$1 WHERE id=$2 RETURNING *",
+      [name, id]
+    );
+    if (rows.length === 0) return res.status(404).json({ message: "Category not found" });
+    await delKey(CATALOG_CACHE_KEY);
+    res.json(rows[0]);
+  } catch {
+    res.status(500).json({ message: "Failed to update category" });
+  }
+});
+
+app.delete("/categories/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query("DELETE FROM categories WHERE id=$1", [id]);
+    await delKey(CATALOG_CACHE_KEY);
+    res.json({ message: "Deleted" });
+  } catch {
+    res.status(500).json({ message: "Failed to delete category" });
+  }
+});
+
+/* ======================
+   SERVICES CRUD
+====================== */
+app.post("/services", async (req, res) => {
+  try {
+    const { category_id, name, description, duration_minutes, price_rsd, max_clients, slot_start, slot_end } = req.body;
+    if (!category_id || !name || !duration_minutes || !price_rsd) {
+      return res.status(400).json({ message: "category_id, name, duration_minutes, price_rsd are required" });
+    }
+    const { rows } = await pool.query(
+      `INSERT INTO services (category_id, name, description, duration_minutes, price_rsd, max_clients, slot_start, slot_end)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [category_id, name, description ?? null, duration_minutes, price_rsd,
+       max_clients ?? 1, slot_start ?? "09:00", slot_end ?? "18:00"]
+    );
+    await delKey(CATALOG_CACHE_KEY);
+    res.status(201).json(rows[0]);
+  } catch (err: any) {
+    console.error("POST /services error:", err?.message);
+    res.status(500).json({ message: "Failed to create service" });
+  }
+});
+
+app.put("/services/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { category_id, name, description, duration_minutes, price_rsd, max_clients, slot_start, slot_end } = req.body;
+    const { rows } = await pool.query(
+      `UPDATE services SET
+         category_id=$1, name=$2, description=$3, duration_minutes=$4,
+         price_rsd=$5, max_clients=$6, slot_start=$7, slot_end=$8
+       WHERE id=$9 RETURNING *`,
+      [category_id, name, description ?? null, duration_minutes, price_rsd,
+       max_clients ?? 1, slot_start ?? "09:00", slot_end ?? "18:00", id]
+    );
+    if (rows.length === 0) return res.status(404).json({ message: "Service not found" });
+    await delKey(CATALOG_CACHE_KEY);
+    res.json(rows[0]);
+  } catch (err: any) {
+    console.error("PUT /services/:id error:", err?.message);
+    res.status(500).json({ message: "Failed to update service" });
+  }
+});
+
+app.delete("/services/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query("DELETE FROM services WHERE id=$1", [id]);
+    await delKey(CATALOG_CACHE_KEY);
+    res.json({ message: "Deleted" });
+  } catch {
+    res.status(500).json({ message: "Failed to delete service" });
+  }
+});
+
+/* ======================
+   CURRENCIES
+====================== */
+app.get("/currencies", async (_req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT code FROM allowed_currencies ORDER BY code");
+    res.json(rows.map((r: any) => r.code));
+  } catch {
+    res.status(500).json({ message: "Failed to load currencies" });
+  }
+});
+
+app.put("/currencies", async (req, res) => {
+  try {
+    const { codes } = req.body;
+    if (!Array.isArray(codes) || codes.length === 0) {
+      return res.status(400).json({ message: "codes array is required" });
+    }
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("DELETE FROM allowed_currencies");
+      for (const code of codes) {
+        await client.query("INSERT INTO allowed_currencies (code) VALUES ($1)", [code.toUpperCase()]);
+      }
+      await client.query("COMMIT");
+      res.json({ codes });
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch {
+    res.status(500).json({ message: "Failed to update currencies" });
+  }
+});
+
+/* ======================
+   RESERVATIONS
 ====================== */
 function randomCode(len = 8) {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -282,28 +472,17 @@ function randomCode(len = 8) {
   return out;
 }
 
-// Proverava da li danas pada pre ili na datum discount_until
 function isDiscountActive(discountUntil: string | null): boolean {
   if (!discountUntil) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const until = new Date(discountUntil);
-  until.setHours(0, 0, 0, 0);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const until = new Date(discountUntil); until.setHours(0, 0, 0, 0);
   return today <= until;
 }
 
-/* ======================
-   POST /reservations
-====================== */
 app.post("/reservations", async (req, res) => {
   try {
-    const {
-      first_name, last_name, email, phone,
-      address1, postal_code, city, country,
-      currency, promo_code_used, items
-    } = req.body;
+    const { first_name, last_name, email, phone, address1, postal_code, city, country, currency, promo_code_used, items } = req.body;
 
-    // — Validacija obaveznih polja —
     if (!first_name || !last_name || !email || !address1 || !postal_code || !city || !country) {
       return res.status(400).json({ message: "Missing required customer fields" });
     }
@@ -315,136 +494,80 @@ app.post("/reservations", async (req, res) => {
     try {
       await client.query("BEGIN");
 
-      // — Promo kod validacija —
+      // Promo kod validacija
       let promoDiscount = false;
       let promoReservationId: number | null = null;
 
       if (promo_code_used) {
         const promoRes = await client.query(
-          `SELECT id, status, promo_code_used
-           FROM reservations
-           WHERE promo_code = $1`,
+          "SELECT id, status, promo_code_used FROM reservations WHERE promo_code = $1",
           [promo_code_used.toUpperCase()]
         );
-
         if (promoRes.rows.length === 0) {
           await client.query("ROLLBACK");
           return res.status(400).json({ message: "Promo kod nije pronađen" });
         }
-
         const promoRow = promoRes.rows[0];
-
         if (promoRow.status === "cancelled") {
           await client.query("ROLLBACK");
           return res.status(400).json({ message: "Promo kod otkazane rezervacije nije važeći" });
         }
-
         if (promoRow.promo_code_used) {
           await client.query("ROLLBACK");
           return res.status(400).json({ message: "Promo kod je već iskorišćen" });
         }
-
         promoDiscount = true;
         promoReservationId = promoRow.id;
       }
 
-      // — Provjera popusta 10% iz settings —
+      // Popust iz settings
       const settingsRes = await client.query("SELECT discount_until FROM settings LIMIT 1");
-      const discountUntil = settingsRes.rows[0]?.discount_until ?? null;
-      const tenPctActive = isDiscountActive(discountUntil);
+      const tenPctActive = isDiscountActive(settingsRes.rows[0]?.discount_until ?? null);
 
-      // — Generiši kodove —
       const accessCode = randomCode(8);
       const promoCode = randomCode(6);
 
-      // — Insert rezervacije —
       const ins = await client.query(
-        `INSERT INTO reservations
-          (first_name, last_name, email, phone, address1, postal_code, city, country,
-           access_code, promo_code, currency)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-         RETURNING *`,
-        [first_name, last_name, email, phone ?? null,
-         address1, postal_code, city, country,
-         accessCode, promoCode, currency ?? "RSD"]
+        `INSERT INTO reservations (first_name,last_name,email,phone,address1,postal_code,city,country,access_code,promo_code,currency)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+        [first_name, last_name, email, phone ?? null, address1, postal_code, city, country, accessCode, promoCode, currency ?? "RSD"]
       );
       const reservation = ins.rows[0];
 
-      // — Insert stavki + izračun cene —
       let subtotal = 0;
-
       for (const it of items) {
         const { service_id, date, time } = it;
-
         if (!service_id || !date || !time) {
           await client.query("ROLLBACK");
           return res.status(400).json({ message: "Each item needs service_id, date, time" });
         }
-
-        const svc = await client.query(
-          "SELECT id, price_rsd FROM services WHERE id = $1",
-          [service_id]
-        );
+        const svc = await client.query("SELECT id, price_rsd FROM services WHERE id=$1", [service_id]);
         if (svc.rows.length === 0) {
           await client.query("ROLLBACK");
           return res.status(400).json({ message: `Service ${service_id} not found` });
         }
-
         const unitPrice = Number(svc.rows[0].price_rsd);
         subtotal += unitPrice;
-
         await client.query(
-          `INSERT INTO reservation_items
-            (reservation_id, service_id, date, time, unit_price, line_total)
-           VALUES ($1,$2,$3,$4,$5,$6)`,
+          "INSERT INTO reservation_items (reservation_id,service_id,date,time,unit_price,line_total) VALUES ($1,$2,$3,$4,$5,$6)",
           [reservation.id, service_id, date, time, unitPrice, unitPrice]
         );
       }
 
-      // — Primena popusta —
-      // Redosled: prvo 10% za datum, pa 5% promo (na već sniženu cenu)
       let total = subtotal;
       let discount10 = 0;
       let discount5 = 0;
+      if (tenPctActive) { discount10 = Math.round(total * 0.10); total -= discount10; }
+      if (promoDiscount) { discount5 = Math.round(total * 0.05); total -= discount5; }
 
-      if (tenPctActive) {
-        discount10 = Math.round(total * 0.10);
-        total -= discount10;
-      }
+      await client.query("UPDATE reservations SET total_amount=$1 WHERE id=$2", [total, reservation.id]);
 
-      if (promoDiscount) {
-        discount5 = Math.round(total * 0.05);
-        total -= discount5;
-      }
-
-      // — Update total —
-      await client.query(
-        "UPDATE reservations SET total_amount = $1 WHERE id = $2",
-        [total, reservation.id]
-      );
-
-      // — Označi promo kod kao iskorišćen —
       if (promoReservationId !== null) {
-        await client.query(
-          "UPDATE reservations SET promo_code_used = TRUE WHERE id = $1",
-          [promoReservationId]
-        );
-        console.log(`✅ Promo kod ${promo_code_used} iskorišćen (rez. #${promoReservationId})`);
+        await client.query("UPDATE reservations SET promo_code_used=TRUE WHERE id=$1", [promoReservationId]);
       }
 
       await client.query("COMMIT");
-
-      return res.status(201).json({
-        reservationId: reservation.id,
-        accessCode: reservation.access_code,
-        promoCode: reservation.promo_code,
-        subtotal,
-        discount10,
-        discount5,
-        totalAmount: total,
-        currency: currency ?? "RSD",
-        status: reservation.status
-      });
+      return res.status(201).json({ reservationId: reservation.id, accessCode: reservation.access_code, promoCode: reservation.promo_code, subtotal, discount10, discount5, totalAmount: total, currency: currency ?? "RSD", status: reservation.status });
 
     } catch (e) {
       await client.query("ROLLBACK");
@@ -453,130 +576,105 @@ app.post("/reservations", async (req, res) => {
       client.release();
     }
   } catch (err: any) {
-    console.error("POST /reservations error:", err?.message || err);
+    console.error("POST /reservations error:", err?.message);
     return res.status(500).json({ message: "Failed to create reservation" });
   }
 });
 
-/* ======================
-   GET /reservations
-====================== */
 app.get("/reservations", async (_req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, first_name, last_name, email, total_amount, status, created_at
-       FROM reservations
-       ORDER BY created_at DESC
-       LIMIT 50`
+      "SELECT id,first_name,last_name,email,total_amount,status,created_at FROM reservations ORDER BY created_at DESC LIMIT 50"
     );
     res.json(rows);
   } catch (err: any) {
-    console.error("GET /reservations error:", err?.message || err);
+    console.error("GET /reservations error:", err?.message);
     res.status(500).json({ message: "Failed to load reservations" });
   }
 });
 
-/* ======================
-   GET /reservations/:id
-====================== */
 app.get("/reservations/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const header = await pool.query("SELECT * FROM reservations WHERE id = $1", [id]);
+    const header = await pool.query("SELECT * FROM reservations WHERE id=$1", [id]);
     if (header.rows.length === 0) return res.status(404).json({ message: "Reservation not found" });
-
     const items = await pool.query(
-      `SELECT ri.id, ri.service_id, s.name as service_name,
-              ri.date, ri.time, ri.unit_price, ri.line_total
-       FROM reservation_items ri
-       JOIN services s ON s.id = ri.service_id
-       WHERE ri.reservation_id = $1
-       ORDER BY ri.date, ri.time`,
+      `SELECT ri.id, ri.service_id, s.name as service_name, ri.date, ri.time, ri.unit_price, ri.line_total
+       FROM reservation_items ri JOIN services s ON s.id=ri.service_id
+       WHERE ri.reservation_id=$1 ORDER BY ri.date, ri.time`,
       [id]
     );
-
     res.json({ reservation: header.rows[0], items: items.rows });
   } catch (err: any) {
-    console.error("GET /reservations/:id error:", err?.message || err);
+    console.error("GET /reservations/:id error:", err?.message);
     res.status(500).json({ message: "Failed to load reservation" });
   }
 });
 
-/* ======================
-   POST /reservations/lookup
-   (pronađi rezervaciju po šifri + email)
-====================== */
 app.post("/reservations/lookup", async (req, res) => {
   try {
     const { access_code, email } = req.body;
-    if (!access_code || !email) {
-      return res.status(400).json({ message: "access_code and email are required" });
-    }
-
+    if (!access_code || !email) return res.status(400).json({ message: "access_code and email required" });
     const header = await pool.query(
-      "SELECT * FROM reservations WHERE access_code = $1 AND email = $2",
+      "SELECT * FROM reservations WHERE access_code=$1 AND email=$2",
       [access_code.toUpperCase(), email.toLowerCase()]
     );
-    if (header.rows.length === 0) {
-      return res.status(404).json({ message: "Rezervacija nije pronađena" });
-    }
-
+    if (header.rows.length === 0) return res.status(404).json({ message: "Rezervacija nije pronađena" });
     const items = await pool.query(
-      `SELECT ri.id, ri.service_id, s.name as service_name,
-              ri.date, ri.time, ri.unit_price, ri.line_total
-       FROM reservation_items ri
-       JOIN services s ON s.id = ri.service_id
-       WHERE ri.reservation_id = $1
-       ORDER BY ri.date, ri.time`,
+      `SELECT ri.id, ri.service_id, s.name as service_name, ri.date, ri.time, ri.unit_price, ri.line_total
+       FROM reservation_items ri JOIN services s ON s.id=ri.service_id
+       WHERE ri.reservation_id=$1 ORDER BY ri.date, ri.time`,
       [header.rows[0].id]
     );
-
     res.json({ reservation: header.rows[0], items: items.rows });
   } catch (err: any) {
-    console.error("POST /reservations/lookup error:", err?.message || err);
+    console.error("POST /reservations/lookup error:", err?.message);
     res.status(500).json({ message: "Failed to lookup reservation" });
   }
 });
 
-/* ======================
-   POST /reservations/:id/cancel
-====================== */
 app.post("/reservations/:id/cancel", async (req, res) => {
   try {
     const { id } = req.params;
     const { access_code, email } = req.body;
-
-    if (!access_code || !email) {
-      return res.status(400).json({ message: "access_code and email are required" });
-    }
-
+    if (!access_code || !email) return res.status(400).json({ message: "access_code and email required" });
     const found = await pool.query(
-      "SELECT * FROM reservations WHERE id = $1 AND access_code = $2 AND email = $3",
+      "SELECT * FROM reservations WHERE id=$1 AND access_code=$2 AND email=$3",
       [id, access_code.toUpperCase(), email.toLowerCase()]
     );
-    if (found.rows.length === 0) {
-      return res.status(404).json({ message: "Rezervacija nije pronađena ili pogrešni podaci" });
-    }
-
-    const reservation = found.rows[0];
-    if (reservation.status === "cancelled") {
-      return res.status(400).json({ message: "Rezervacija je već otkazana" });
-    }
-
-    await pool.query(
-      "UPDATE reservations SET status = 'cancelled' WHERE id = $1",
-      [id]
-    );
-
-    console.log(`🚫 Rezervacija #${id} otkazana`);
-
-    res.json({ message: "Rezervacija je uspešno otkazana", reservationId: Number(id) });
+    if (found.rows.length === 0) return res.status(404).json({ message: "Rezervacija nije pronađena" });
+    if (found.rows[0].status === "cancelled") return res.status(400).json({ message: "Već otkazana" });
+    await pool.query("UPDATE reservations SET status='cancelled' WHERE id=$1", [id]);
+    res.json({ message: "Rezervacija otkazana", reservationId: Number(id) });
   } catch (err: any) {
-    console.error("POST /reservations/:id/cancel error:", err?.message || err);
+    console.error("POST /reservations/:id/cancel error:", err?.message);
     res.status(500).json({ message: "Failed to cancel reservation" });
   }
 });
-
+app.get("/reservations/slots", async (req, res) => {
+  try {
+    const { service_id, date } = req.query;
+    if (!service_id || !date) {
+      return res.status(400).json({ message: "service_id and date required" });
+    }
+    const { rows } = await pool.query(
+      `SELECT time, COUNT(*) as count
+       FROM reservation_items ri
+       JOIN reservations r ON r.id = ri.reservation_id
+       WHERE ri.service_id = $1 AND ri.date = $2 AND r.status != 'cancelled'
+       GROUP BY time`,
+      [service_id, date]
+    );
+    const result: Record<string, number> = {};
+    for (const row of rows) {
+      result[row.time.slice(0, 5)] = Number(row.count);
+    }
+    res.json(result);
+  } catch (err: any) {
+    console.error("GET /reservations/slots error:", err?.message);
+    res.status(500).json({ message: "Failed to load slots" });
+  }
+});
 /* ======================
    404
 ====================== */
@@ -588,15 +686,9 @@ app.use((_req, res) => {
    START
 ====================== */
 async function start() {
-  try {
-    await ensureRedis();
-  } catch {
-    console.warn("⚠️ Redis unavailable, continuing without cache");
-  }
-
-  app.listen(PORT, () => {
-    console.log(`✅ Server running on port ${PORT}`);
-  });
+  try { await ensureRedis(); }
+  catch { console.warn("⚠️ Redis unavailable, continuing without cache"); }
+  app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 }
 
 start();
