@@ -490,7 +490,7 @@ function SettingsPanel() {
 
   return (
     <div style={{ maxWidth: "520px", display: "flex", flexDirection: "column", gap: "1rem" }}>
-      <SectionTitle>Podešavanja salona</SectionTitle>
+      <SectionTitle>Podešavanje osnovnih informacija o salonu</SectionTitle>
       <Field label="Naziv salona"><Input value={form.name} onChange={setF("name")} placeholder="Trač" /></Field>
       <Field label="Opis"><Textarea value={form.description} onChange={setF("description")} placeholder="Opis salona…" /></Field>
       <Field label="Radno vreme"><Input value={form.working_hours} onChange={setF("working_hours")} placeholder="Pon–Pet 09:00–18:00" /></Field>
@@ -656,15 +656,134 @@ function ReservationsPanel() {
   );
 }
 
+// ─── SALON HOURS ──────────────────────────────────────────────────────────────
+
+interface SalonHour {
+  day_of_week: number;
+  open_time: string;
+  close_time: string;
+  is_closed: boolean;
+}
+
+// 0=Ned, 1=Pon, 2=Uto, 3=Sre, 4=Čet, 5=Pet, 6=Sub — mora da odgovara JavaScript getDay()
+const DAY_NAMES: Record<number, string> = {
+  0: "Nedelja",
+  1: "Ponedeljak",
+  2: "Utorak",
+  3: "Sreda",
+  4: "Četvrtak",
+  5: "Petak",
+  6: "Subota",
+};
+
+// Sortiraj da se prikazuje Pon-Ned redosled (1,2,3,4,5,6,0)
+const DISPLAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+
+function SalonHoursPanel() {
+  const [hours, setHours] = useState<SalonHour[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" } | null>(null);
+
+  function showToast(msg: string, type: "ok" | "err") {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  }
+
+  useEffect(() => {
+    fetch(`${API}/salon-hours`).then((r) => r.json()).then(setHours).catch(() => {});
+  }, []);
+
+  function update(dayIndex: number, field: keyof SalonHour, value: any) {
+    setHours((prev) =>
+      prev.map((h) => h.day_of_week === dayIndex ? { ...h, [field]: value } : h)
+    );
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      const r = await fetch(`${API}/salon-hours`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hours }),
+      });
+      if (r.ok) showToast("Radno vreme sačuvano!", "ok");
+      else showToast("Greška pri čuvanju", "err");
+    } catch {
+      showToast("Greška pri čuvanju", "err");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (hours.length === 0) return <p style={{ color: "#6b2145" }}>Učitavanje…</p>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+      <SectionTitle>Radno vreme salona</SectionTitle>
+      
+
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+        {DISPLAY_ORDER.map((dow) => {
+          const h = hours.find((x) => x.day_of_week === dow);
+          if (!h) return null;
+          return (
+            <div key={h.day_of_week} style={{
+              display: "grid", gridTemplateColumns: "110px 1fr 1fr auto",
+              alignItems: "center", gap: "0.75rem",
+              background: h.is_closed ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.65)",
+              borderRadius: "14px", border: "1.5px solid rgba(255,61,138,0.15)",
+              padding: "0.65rem 1rem",
+              opacity: h.is_closed ? 0.6 : 1,
+            }}>
+              <span style={{ fontWeight: 700, fontSize: "0.88rem", color: "#1a0a10" }}>
+                {DAY_NAMES[h.day_of_week]}
+              </span>
+              <input
+                type="time" value={h.open_time} disabled={h.is_closed}
+                onChange={(e) => update(h.day_of_week, "open_time", e.target.value)}
+                style={{ ...inputStyle, opacity: h.is_closed ? 0.4 : 1 }}
+              />
+              <input
+                type="time" value={h.close_time} disabled={h.is_closed}
+                onChange={(e) => update(h.day_of_week, "close_time", e.target.value)}
+                style={{ ...inputStyle, opacity: h.is_closed ? 0.4 : 1 }}
+              />
+              <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", whiteSpace: "nowrap" }}>
+                <input
+                  type="checkbox" id={`closed-${h.day_of_week}`}
+                  checked={h.is_closed}
+                  onChange={(e) => update(h.day_of_week, "is_closed", e.target.checked)}
+                  style={{ accentColor: "#f01f72", width: "16px", height: "16px", cursor: "pointer" }}
+                />
+                <label htmlFor={`closed-${h.day_of_week}`} style={{ fontSize: "0.78rem", fontWeight: 600, color: "#6b2145", cursor: "pointer", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+                  Zatvoreno
+                </label>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {toast && <Toast {...toast} />}
+
+      <button className="btn-primary" onClick={save} disabled={saving}>
+        {saving ? "Čuvam…" : "💾 Sačuvaj radno vreme"}
+      </button>
+    </div>
+  );
+}
+
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 
-type Panel = "categories" | "services" | "currencies" | "settings" | "reservations";
+type Panel = "categories" | "services" | "currencies" | "hours" | "settings" | "reservations";
 
 const MENU: { key: Panel; label: string; icon: string }[] = [
   { key: "categories",   label: "Kategorije usluga",  icon: "🗂️" },
   { key: "services",     label: "Usluge",              icon: "💅" },
   { key: "currencies",   label: "Valute & popust",     icon: "💱" },
-  { key: "settings",     label: "Podešavanja salona",  icon: "⚙️" },
+  { key: "hours",        label: "Radno vreme",         icon: "🕐" }, 
+  { key: "settings",     label: "Osnovna podešavanja",  icon: "⚙️" },
   { key: "reservations", label: "Rezervacije",         icon: "📋" },
 ];
 
@@ -733,6 +852,7 @@ export default function Admin() {
             {active === "categories"   && <CategoriesPanel />}
             {active === "services"     && <ServicesPanel />}
             {active === "currencies"   && <CurrenciesPanel />}
+            {active === "hours" && <SalonHoursPanel />}
             {active === "settings"     && <SettingsPanel />}
             {active === "reservations" && <ReservationsPanel />}
           </div>

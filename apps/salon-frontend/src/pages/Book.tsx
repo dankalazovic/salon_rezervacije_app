@@ -1,6 +1,21 @@
 import { useEffect, useState } from "react";
+import DatePicker, { registerLocale } from "react-datepicker";
+import { enUS } from "date-fns/locale/en-US";
+import "react-datepicker/dist/react-datepicker.css";
 import Button from "../components/Button";
 import Card from "../components/Card";
+
+// Srpski locale latinica, ručno — weekStartsOn:1 = Ponedeljak prvi dan
+const srLatinLocale = {
+  ...enUS,
+  localize: {
+    ...enUS.localize,
+    day: (n: number) => (["Ned","Pon","Uto","Sre","Čet","Pet","Sub"] as const)[n],
+    month: (n: number) => (["Januar","Februar","Mart","April","Maj","Jun","Jul","Avgust","Septembar","Oktobar","Novembar","Decembar"] as const)[n],
+  },
+  options: { ...enUS.options, weekStartsOn: 1 as const },
+};
+registerLocale("sr-latn", srLatinLocale as any);
 
 const API = "http://localhost:4000";
 
@@ -50,6 +65,82 @@ interface BookingResult {
   currency: string;
 }
 
+interface SalonHour {
+  day_of_week: number;
+  open_time: string;
+  close_time: string;
+  is_closed: boolean;
+}
+
+// ─── Datepicker CSS override (pink theme) ────────────────────────────────────
+
+const datepickerStyles = `
+  .salon-datepicker .react-datepicker {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    border: 1.5px solid rgba(255,61,138,0.30);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(255,61,138,0.15);
+  }
+  .salon-datepicker .react-datepicker__header {
+    background: linear-gradient(135deg, #ff3d8a, #f01f72);
+    border-bottom: none;
+    padding: 12px 0 8px;
+  }
+  .salon-datepicker .react-datepicker__current-month,
+  .salon-datepicker .react-datepicker__day-name {
+    color: white;
+    font-weight: 700;
+  }
+  .salon-datepicker .react-datepicker__navigation-icon::before {
+    border-color: white;
+  }
+  .salon-datepicker .react-datepicker__day--selected,
+  .salon-datepicker .react-datepicker__day--keyboard-selected {
+    background: linear-gradient(135deg, #ff3d8a, #f01f72);
+    border-radius: 50%;
+    color: white;
+    font-weight: 700;
+  }
+  .salon-datepicker .react-datepicker__day:hover:not(.react-datepicker__day--disabled) {
+    background: rgba(255,61,138,0.15);
+    border-radius: 50%;
+    color: #f01f72;
+  }
+  .salon-datepicker .react-datepicker__day--disabled {
+    color: #d1d5db !important;
+    cursor: not-allowed;
+    text-decoration: line-through;
+  }
+  .salon-datepicker .react-datepicker__day--today {
+    font-weight: 800;
+    color: #f01f72;
+  }
+  .salon-datepicker .react-datepicker__day--today.react-datepicker__day--selected {
+    color: white;
+  }
+  .salon-datepicker .react-datepicker__input-container input {
+    width: 100%;
+    border-radius: 12px;
+    background: white;
+    border: 1.5px solid rgba(255,61,138,0.20);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.85rem;
+    outline: none;
+    box-sizing: border-box;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: #1a0a10;
+    cursor: pointer;
+  }
+  .salon-datepicker .react-datepicker__input-container input:focus {
+    border-color: rgba(255,61,138,0.50);
+    box-shadow: 0 0 0 3px rgba(255,61,138,0.10);
+  }
+  .salon-datepicker .react-datepicker__triangle {
+    display: none;
+  }
+`;
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function generateTimeSlots(start = "09:00", end = "18:00", step = 30): string[] {
@@ -67,32 +158,9 @@ function generateTimeSlots(start = "09:00", end = "18:00", step = 30): string[] 
   return slots;
 }
 
-// Proveri da li se dve usluge vremenski preklapaju na isti datum
-// Uslov: sisanje završi u 15:00, manikir može početi tačno u 15:00 (ok)
 function timeToMinutes(t: string): number {
   const [h, m] = t.split(":").map(Number);
   return h * 60 + m;
-}
-
-function hasTimeConflict(items: SelectedItem[]): string | null {
-  // Samo proveravamo stavke koje imaju i datum i vreme
-  const scheduled = items.filter((i) => i.date && i.time);
-  for (let a = 0; a < scheduled.length; a++) {
-    for (let b = a + 1; b < scheduled.length; b++) {
-      const ia = scheduled[a];
-      const ib = scheduled[b];
-      if (ia.date !== ib.date) continue; // različiti dani — nema konflikta
-      const aStart = timeToMinutes(ia.time);
-      const aEnd = aStart + ia.service.duration_minutes;
-      const bStart = timeToMinutes(ib.time);
-      const bEnd = bStart + ib.service.duration_minutes;
-      // Preklapanje postoji ako se intervali seku (ali ne ako jedan odmah počinje kad drugi završi)
-      if (aStart < bEnd && bStart < aEnd) {
-        return `"${ia.service.name}" (${ia.time}–${minutesToTime(aEnd)}) i "${ib.service.name}" (${ib.time}–${minutesToTime(bEnd)}) se preklapaju. Zakaži ih jedno za drugim.`;
-      }
-    }
-  }
-  return null;
 }
 
 function minutesToTime(mins: number): string {
@@ -101,28 +169,83 @@ function minutesToTime(mins: number): string {
   return `${h}:${m}`;
 }
 
-
-
-function todayStr() {
-  return new Date().toISOString().split("T")[0];
+function hasTimeConflict(items: SelectedItem[]): string | null {
+  const scheduled = items.filter((i) => i.date && i.time);
+  for (let a = 0; a < scheduled.length; a++) {
+    for (let b = a + 1; b < scheduled.length; b++) {
+      const ia = scheduled[a];
+      const ib = scheduled[b];
+      if (ia.date !== ib.date) continue;
+      const aStart = timeToMinutes(ia.time);
+      const aEnd = aStart + ia.service.duration_minutes;
+      const bStart = timeToMinutes(ib.time);
+      const bEnd = bStart + ib.service.duration_minutes;
+      if (aStart < bEnd && bStart < aEnd) {
+        return `"${ia.service.name}" (${ia.time}–${minutesToTime(aEnd)}) i "${ib.service.name}" (${ib.time}–${minutesToTime(bEnd)}) se preklapaju. Zakaži ih jedno za drugim.`;
+      }
+    }
+  }
+  return null;
 }
 
-// Učitaj zauzete termine za uslugu na određeni datum
+function todayDate(): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function dateToStr(d: Date): string {
+  // VAŽNO: ne koristiti toISOString() jer konvertuje u UTC i može dati prethodni dan
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function strToDate(s: string): Date | null {
+  if (!s) return null;
+  // VAŽNO: parsirati kao lokalno vreme, ne UTC
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+// Vraća slot_start i slot_end za uslugu
+function getServiceSlotRange(
+  service: Service,
+  date: string,
+  salonHours: Record<number, SalonHour>
+): { start: string; end: string; closed: boolean } {
+  if (service.slot_start && service.slot_end) {
+    return {
+      start: service.slot_start.slice(0, 5),
+      end: service.slot_end.slice(0, 5),
+      closed: false,
+    };
+  }
+  if (date) {
+    const dow = new Date(date + "T00:00:00").getDay();
+    const sh = salonHours[dow];
+    if (sh) {
+      return {
+        start: sh.open_time.slice(0, 5),
+        end: sh.close_time.slice(0, 5),
+        closed: sh.is_closed,
+      };
+    }
+  }
+  return { start: "09:00", end: "18:00", closed: false };
+}
+
 async function fetchTakenSlots(serviceId: number, date: string): Promise<Record<string, number>> {
   try {
     const r = await fetch(`${API}/reservations/slots?service_id=${serviceId}&date=${date}`);
-    if (!r.ok) { console.warn("slots endpoint error", r.status); return {}; }
-    const data = await r.json();
-    console.log(`🔍 takenSlots service=${serviceId} date=${date}`, data);
-    return data;
-  } catch (e) {
-    console.error("fetchTakenSlots failed", e);
+    if (!r.ok) return {};
+    return await r.json();
+  } catch {
     return {};
   }
 }
 
-// Kurs valute prema RSD — vraća koliko RSD vredi 1 jedinica date valute
-// Npr. za EUR: 1 EUR = ~118 RSD
 async function fetchExchangeRate(currency: string): Promise<number> {
   if (currency === "RSD") return 1;
   try {
@@ -130,7 +253,7 @@ async function fetchExchangeRate(currency: string): Promise<number> {
     const data = await r.json();
     return data.rates?.["RSD"] ?? 118;
   } catch {
-    return 118; // fallback: 1 EUR ≈ 118 RSD
+    return 118;
   }
 }
 
@@ -157,11 +280,7 @@ function StepIndicator({ step }: { step: number }) {
             }}>
               {done ? "✓" : idx}
             </div>
-            <span style={{
-              fontSize: "0.82rem", fontWeight: 600,
-              color: active ? "#f01f72" : "#9ca3af",
-              fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif"
-            }}>
+            <span style={{ fontSize: "0.82rem", fontWeight: 600, color: active ? "#f01f72" : "#9ca3af", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
               {label}
             </span>
             {i < steps.length - 1 && (
@@ -200,7 +319,12 @@ function InputField({
 
 // ─── Step 1 ───────────────────────────────────────────────────────────────────
 
-function Step1({ data, onChange, onNext, onBack }: { data: CustomerData; onChange: (d: CustomerData) => void; onNext: () => void; onBack: () => void }) {
+function Step1({ data, onChange, onNext, onBack }: {
+  data: CustomerData;
+  onChange: (d: CustomerData) => void;
+  onNext: () => void;
+  onBack: () => void;
+}) {
   const set = (k: keyof CustomerData) => (e: React.ChangeEvent<HTMLInputElement>) =>
     onChange({ ...data, [k]: e.target.value });
 
@@ -213,7 +337,6 @@ function Step1({ data, onChange, onNext, onBack }: { data: CustomerData; onChang
         <h2 style={{ fontSize: "1.6rem", fontWeight: 800, color: "#1a0a10", marginBottom: "0.3rem" }}>Osnovni podaci 💗</h2>
         <p style={{ color: "#6b2145", fontSize: "0.88rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Unesi svoje podatke za rezervaciju.</p>
       </div>
-
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.85rem" }}>
         <InputField label="Ime" required placeholder="Ana" value={data.first_name} onChange={set("first_name")} />
         <InputField label="Prezime" required placeholder="Jovanović" value={data.last_name} onChange={set("last_name")} />
@@ -224,7 +347,6 @@ function Step1({ data, onChange, onNext, onBack }: { data: CustomerData; onChang
         <InputField label="Grad" required placeholder="Beograd" value={data.city} onChange={set("city")} />
         <InputField label="Država" required placeholder="Srbija" value={data.country} onChange={set("country")} />
       </div>
-
       <div style={{ display: "flex", gap: "0.75rem" }}>
         <button className="btn-secondary" onClick={onBack}>← Nazad</button>
         <button className="btn-primary" disabled={!valid} onClick={onNext} style={{ flex: 1, opacity: valid ? 1 : 0.5 }}>
@@ -235,23 +357,23 @@ function Step1({ data, onChange, onNext, onBack }: { data: CustomerData; onChang
   );
 }
 
-// ─── Step 2 ───────────────────────────────────────────────────────────────────
+// ─── ServiceSlotPicker ───────────────────────────────────────────────────────
 
 function ServiceSlotPicker({
-  service, item, otherItems, onDateChange, onTimeChange,
+  service, item, otherItems, salonHours, onDateChange, onTimeChange,
 }: {
   service: Service;
   item: SelectedItem;
-  otherItems: SelectedItem[]; // sve ostale odabrane usluge (bez ove)
+  otherItems: SelectedItem[];
+  salonHours: Record<number, SalonHour>;
   onDateChange: (id: number, date: string) => void;
   onTimeChange: (id: number, time: string) => void;
 }) {
   const [takenSlots, setTakenSlots] = useState<Record<string, number>>({});
   const [loadingSlots, setLoadingSlots] = useState(false);
 
-  const slotStart = service.slot_start?.slice(0, 5) ?? "09:00";
-  const slotEnd = service.slot_end?.slice(0, 5) ?? "18:00";
-  const timeSlots = generateTimeSlots(slotStart, slotEnd);
+  const slotRange = getServiceSlotRange(service, item.date, salonHours);
+  const timeSlots = slotRange.closed ? [] : generateTimeSlots(slotRange.start, slotRange.end, service.duration_minutes);
 
   useEffect(() => {
     if (!item.date) return;
@@ -262,11 +384,19 @@ function ServiceSlotPicker({
     });
   }, [item.date, service.id]);
 
+  // filterDate: vraća true samo za otvorene dane
+  function isDateAllowed(date: Date): boolean {
+    const dow = date.getDay();
+    const sh = salonHours[dow];
+    // Ako nema podataka za taj dan, dozvoljavamo
+    if (!sh) return true;
+    return !sh.is_closed;
+  }
+
   function isSlotFull(time: string) {
     return (takenSlots[time] ?? 0) >= Number(service.max_clients);
   }
 
-  // Proverava da li bi odabir ovog vremena izazvao konflikt sa drugim uslugama
   function isSlotConflicting(time: string): boolean {
     if (!item.date) return false;
     const sameDay = otherItems.filter((i) => i.date === item.date && i.time);
@@ -280,16 +410,38 @@ function ServiceSlotPicker({
   }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.6rem", marginTop: "0.75rem" }}
-      onClick={(e) => e.stopPropagation()}>
+    <div
+      style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.6rem", marginTop: "0.75rem" }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* Datum — react-datepicker */}
       <div>
-        <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "#6b2145", marginBottom: "0.3rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Datum</div>
-        <input
-          type="date" min={todayStr()} value={item.date}
-          onChange={(e) => onDateChange(service.id, e.target.value)}
-          style={{ width: "100%", borderRadius: "12px", background: "white", border: "1.5px solid rgba(255,61,138,0.20)", padding: "0.5rem 0.75rem", fontSize: "0.85rem", outline: "none", boxSizing: "border-box" }}
-        />
+        <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "#6b2145", marginBottom: "0.3rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+          Datum
+        </div>
+        <div className="salon-datepicker">
+          <DatePicker
+            selected={strToDate(item.date)}
+            onChange={(date: Date | null) => {
+              if (!date) {
+                onDateChange(service.id, "");
+                onTimeChange(service.id, "");
+                return;
+              }
+              onDateChange(service.id, dateToStr(date));
+              onTimeChange(service.id, "");
+            }}
+            filterDate={isDateAllowed}
+            minDate={todayDate()}
+            dateFormat="dd.MM.yyyy"
+            placeholderText="Izaberi datum"
+            popperPlacement="bottom-start"
+            locale="sr-latn"
+          />
+        </div>
       </div>
+
+      {/* Vreme */}
       <div>
         <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "#6b2145", marginBottom: "0.3rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
           Vreme {loadingSlots && <span style={{ fontWeight: 400 }}>(učitavam…)</span>}
@@ -297,30 +449,55 @@ function ServiceSlotPicker({
         <select
           value={item.time}
           onChange={(e) => onTimeChange(service.id, e.target.value)}
-          style={{ width: "100%", borderRadius: "12px", background: "white", border: "1.5px solid rgba(255,61,138,0.20)", padding: "0.5rem 0.75rem", fontSize: "0.85rem", outline: "none", boxSizing: "border-box" }}
+          disabled={!item.date || slotRange.closed || loadingSlots}
+          style={{
+            width: "100%", borderRadius: "12px", background: "white",
+            border: "1.5px solid rgba(255,61,138,0.20)",
+            padding: "0.5rem 0.75rem", fontSize: "0.85rem", outline: "none",
+            boxSizing: "border-box",
+            opacity: (!item.date || slotRange.closed || loadingSlots) ? 0.5 : 1,
+          }}
         >
           <option value="">-- izaberi --</option>
-          {timeSlots.map((t) => {
-            const full = isSlotFull(t);
+          {!item.date && <option value="" disabled>Prvo izaberi datum</option>}
+          {item.date && slotRange.closed && <option value="" disabled>Salon je zatvoren taj dan</option>}
+          {item.date && !slotRange.closed && !loadingSlots && timeSlots.map((t) => {
+            const taken = takenSlots[t] ?? 0;
+            const maxClients = Number(service.max_clients);
+            const full = taken >= maxClients;
             const conflict = isSlotConflicting(t);
             const disabled = full || conflict;
             let label = t;
             if (full) label += " — popunjeno";
             else if (conflict) label += " — preklapanje";
+            else if (taken > 0) label += ` — ${maxClients - taken}/${maxClients} slobodno`;
             return (
-              <option key={t} value={t} disabled={disabled}>
-                {label}
-              </option>
+              <option key={t} value={t} disabled={disabled}>{label}</option>
             );
           })}
+          {loadingSlots && <option value="" disabled>Učitavam slobodne termine…</option>}
         </select>
       </div>
+
+      {/* Poruka ako je zatvoren dan (ne bi trebalo da se pojavi jer filterDate blokira, ali kao fallback) */}
+      {item.date && slotRange.closed && (
+        <div style={{
+          gridColumn: "1 / -1", fontSize: "0.78rem", color: "#9a3412",
+          background: "#fff7ed", border: "1.5px solid #fb923c",
+          borderRadius: "10px", padding: "0.45rem 0.75rem",
+          fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif",
+        }}>
+          🚫 Salon je zatvoren taj dan — izaberi drugi datum.
+        </div>
+      )}
     </div>
   );
 }
 
+// ─── Step 2 ───────────────────────────────────────────────────────────────────
+
 function Step2({
-  catalog, selected, currency, currencies, promoInput,
+  catalog, selected, currency, currencies, promoInput, salonHours,
   onToggleService, onDateChange, onTimeChange,
   onCurrencyChange, onPromoChange, onBack, onNext,
 }: {
@@ -329,6 +506,7 @@ function Step2({
   currency: string;
   currencies: string[];
   promoInput: string;
+  salonHours: Record<number, SalonHour>;
   onToggleService: (svc: Service) => void;
   onDateChange: (id: number, date: string) => void;
   onTimeChange: (id: number, time: string) => void;
@@ -338,7 +516,6 @@ function Step2({
   onNext: () => void;
 }) {
   const isSelected = (id: number) => selected.some((s) => s.service.id === id);
-
   const conflictError = hasTimeConflict(selected);
   const canProceed = selected.length > 0 && selected.every((s) => s.date && s.time) && !conflictError;
 
@@ -382,12 +559,14 @@ function Step2({
                       {Number(svc.price_rsd).toLocaleString()} RSD
                     </div>
                   </div>
-
                   {sel && item && (
                     <ServiceSlotPicker
-                      service={svc} item={item}
+                      service={svc}
+                      item={item}
                       otherItems={selected.filter((s) => s.service.id !== svc.id)}
-                      onDateChange={onDateChange} onTimeChange={onTimeChange}
+                      salonHours={salonHours}
+                      onDateChange={onDateChange}
+                      onTimeChange={onTimeChange}
                     />
                   )}
                 </div>
@@ -397,14 +576,12 @@ function Step2({
         </div>
       ))}
 
-      {/* Konflikt termina upozorenje */}
       {conflictError && (
         <div style={{ borderRadius: "14px", background: "#fff7ed", border: "1.5px solid #fb923c", color: "#9a3412", padding: "0.7rem 1rem", fontSize: "0.85rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
           ⏰ <b>Preklapanje termina:</b> {conflictError}
         </div>
       )}
 
-      {/* Valuta i promo */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.85rem" }}>
         <div>
           <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#f01f72", marginBottom: "0.4rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
@@ -464,7 +641,6 @@ function Step3({
   }, [currency]);
 
   const subtotal = selected.reduce((s, i) => s + i.service.price_rsd, 0);
-  const discount10 = 0; // backend računа, ovde samo prikazujemo
   const promoDiscount = promoInput.length >= 5 ? Math.round(subtotal * 0.05) : 0;
   const totalRSD = subtotal - promoDiscount;
   const totalConverted = currency !== "RSD" ? (totalRSD / rate).toFixed(2) : null;
@@ -476,7 +652,6 @@ function Step3({
         <p style={{ color: "#6b2145", fontSize: "0.88rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Proveri detalje pre potvrde.</p>
       </div>
 
-      {/* Podaci */}
       <div style={{ background: "rgba(255,255,255,0.65)", borderRadius: "18px", border: "1.5px solid rgba(255,61,138,0.15)", padding: "1.1rem 1.3rem" }}>
         <div style={{ fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#f01f72", marginBottom: "0.75rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Podaci</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.4rem 2rem", fontSize: "0.88rem", color: "#1a0a10", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
@@ -487,7 +662,6 @@ function Step3({
         </div>
       </div>
 
-      {/* Usluge */}
       <div style={{ background: "rgba(255,255,255,0.65)", borderRadius: "18px", border: "1.5px solid rgba(255,61,138,0.15)", padding: "1.1rem 1.3rem" }}>
         <div style={{ fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#f01f72", marginBottom: "0.75rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Usluge</div>
         <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
@@ -495,14 +669,14 @@ function Step3({
             <div key={item.service.id} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
               <div>
                 <div style={{ fontWeight: 600, color: "#1a0a10" }}>{item.service.name}</div>
-                <div style={{ color: "#6b2145", fontSize: "0.78rem" }}>{new Date(item.date.slice(0, 10) + "T00:00:00").toLocaleDateString("sr-RS", { day: "2-digit", month: "2-digit", year: "numeric" })} u {item.time} · {item.service.duration_minutes} min</div>
+                <div style={{ color: "#6b2145", fontSize: "0.78rem" }}>
+                  {new Date(item.date.slice(0, 10) + "T00:00:00").toLocaleDateString("sr-RS", { day: "2-digit", month: "2-digit", year: "numeric" })} u {item.time} · {item.service.duration_minutes} min
+                </div>
               </div>
               <div style={{ fontWeight: 700, color: "#1a0a10" }}>{Number(item.service.price_rsd).toLocaleString()} RSD</div>
             </div>
           ))}
         </div>
-
-        {/* Obračun */}
         <div style={{ borderTop: "1.5px solid rgba(255,61,138,0.12)", marginTop: "0.85rem", paddingTop: "0.85rem", display: "flex", flexDirection: "column", gap: "0.4rem", fontSize: "0.88rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
           <div style={{ display: "flex", justifyContent: "space-between", color: "#6b2145" }}>
             <span>Međuzbir</span><span>{subtotal.toLocaleString()} RSD</span>
@@ -557,25 +731,21 @@ function SuccessScreen({ result, onNew }: { result: BookingResult; onNew: () => 
         <h2 style={{ fontSize: "1.8rem", fontWeight: 800, color: "#1a0a10", marginBottom: "0.4rem" }}>Rezervacija potvrđena!</h2>
         <p style={{ color: "#6b2145", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Vidimo se u salonu Trač 💗</p>
       </div>
-
       <div style={{ background: "rgba(255,255,255,0.70)", border: "1.5px solid rgba(255,61,138,0.18)", borderRadius: "20px", padding: "1.5rem", width: "100%", maxWidth: "340px", display: "flex", flexDirection: "column", gap: "1rem", textAlign: "left" }}>
         <div>
           <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#f01f72", marginBottom: "0.4rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Šifra za pristup</div>
           <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "#1a0a10", letterSpacing: "0.15em" }}>{result.accessCode}</div>
           <div style={{ fontSize: "0.75rem", color: "#6b2145", marginTop: "0.25rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Sačuvaj ovu šifru — potrebna je za izmenu rezervacije.</div>
         </div>
-
         <div>
           <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#f01f72", marginBottom: "0.4rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Tvoj promo kod</div>
           <div style={{ fontSize: "1.3rem", fontWeight: 800, color: "#ff3d8a", letterSpacing: "0.12em" }}>{result.promoCode}</div>
           <div style={{ fontSize: "0.75rem", color: "#6b2145", marginTop: "0.25rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Iskoristi za sledeću rezervaciju — 5% popusta!</div>
         </div>
-
         <div style={{ borderTop: "1.5px solid rgba(255,61,138,0.12)", paddingTop: "0.85rem", display: "flex", justifyContent: "space-between", fontWeight: 800, color: "#1a0a10", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
           <span>Ukupno naplaćeno</span>
           <span>{Number(result.totalAmount).toLocaleString()} RSD</span>
         </div>
-
         {result.discount10 > 0 && (
           <div style={{ fontSize: "0.78rem", color: "#065f46", background: "#d1fae5", borderRadius: "10px", padding: "0.5rem 0.75rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
             ✅ Primenjen popust 10% (-{result.discount10.toLocaleString()} RSD)
@@ -587,13 +757,10 @@ function SuccessScreen({ result, onNew }: { result: BookingResult; onNew: () => 
           </div>
         )}
       </div>
-
       <button className="btn-secondary" onClick={onNew}>Nova rezervacija</button>
     </div>
   );
 }
-
-// ─── Main ─────────────────────────────────────────────────────────────────────
 
 // ─── Manage Reservation ───────────────────────────────────────────────────────
 
@@ -618,7 +785,7 @@ interface ManagedReservation {
   promo_code: string;
 }
 
-function ManageReservation({ onBack }: { onBack: () => void }) {
+function ManageReservation({ onBack, salonHours }: { onBack: () => void; salonHours: Record<number, SalonHour> }) {
   const [mode, setMode] = useState<"lookup" | "view">("lookup");
   const [code, setCode] = useState("");
   const [email, setEmail] = useState("");
@@ -635,10 +802,24 @@ function ManageReservation({ onBack }: { onBack: () => void }) {
   const [addTime, setAddTime] = useState("");
   const [addServiceId, setAddServiceId] = useState<number | "">("");
   const [cancelConfirm, setCancelConfirm] = useState(false);
+  const [addTakenSlots, setAddTakenSlots] = useState<Record<string, number>>({});
 
   useEffect(() => {
     fetch(`${API}/catalog`).then((r) => r.json()).then(setCatalog).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!addServiceId || !addDate) { setAddTakenSlots({}); return; }
+    fetchTakenSlots(Number(addServiceId), addDate).then(setAddTakenSlots);
+  }, [addServiceId, addDate]);
+
+  // filterDate za ManageReservation add panel
+  function isDateAllowed(date: Date): boolean {
+    const dow = date.getDay();
+    const sh = salonHours[dow];
+    if (!sh) return true;
+    return !sh.is_closed;
+  }
 
   async function handleLookup() {
     setLoading(true); setError(null);
@@ -729,7 +910,6 @@ function ManageReservation({ onBack }: { onBack: () => void }) {
     borderRadius: "28px", padding: "2rem 2.5rem",
   };
 
-  // ── Lookup forma ──
   if (mode === "lookup") {
     return (
       <div style={{ maxWidth: "600px", margin: "0 auto" }}>
@@ -767,10 +947,7 @@ function ManageReservation({ onBack }: { onBack: () => void }) {
                 ⚠️ {error}
               </div>
             )}
-            <button
-              className="btn-primary" onClick={handleLookup}
-              disabled={loading || !code || !email} style={{ opacity: (!code || !email) ? 0.5 : 1 }}
-            >
+            <button className="btn-primary" onClick={handleLookup} disabled={loading || !code || !email} style={{ opacity: (!code || !email) ? 0.5 : 1 }}>
               {loading ? "Tražim…" : "Pronađi rezervaciju →"}
             </button>
           </div>
@@ -779,23 +956,18 @@ function ManageReservation({ onBack }: { onBack: () => void }) {
     );
   }
 
-  // ── View/edit rezervacije ──
   if (!reservation) return null;
   const isCancelled = reservation.status === "cancelled";
-
-  // Flatten svih usluga iz kataloga za add panel
   const allServices = catalog.flatMap((c) => c.services);
   const selectedAddSvc = allServices.find((s) => s.id === addServiceId);
-  const addSlots = selectedAddSvc ? generateTimeSlots(selectedAddSvc.slot_start?.slice(0, 5) ?? "09:00", selectedAddSvc.slot_end?.slice(0, 5) ?? "18:00") : [];
 
-  // Taken slotovi za odabranu uslugu na odabrani datum (kapacitet)
-  const [addTakenSlots, setAddTakenSlots] = useState<Record<string, number>>({});
-  useEffect(() => {
-    if (!addServiceId || !addDate) { setAddTakenSlots({}); return; }
-    fetchTakenSlots(Number(addServiceId), addDate).then(setAddTakenSlots);
-  }, [addServiceId, addDate]);
+  const addSlotRange = selectedAddSvc
+    ? getServiceSlotRange(selectedAddSvc, addDate, salonHours)
+    : { start: "09:00", end: "18:00", closed: false };
+  const addSlots = selectedAddSvc && !addSlotRange.closed
+    ? generateTimeSlots(addSlotRange.start, addSlotRange.end, selectedAddSvc.duration_minutes)
+    : [];
 
-  // Pretvori postojeće items u format za conflict detection
   const existingAsSelectedItems: SelectedItem[] = items
     .filter((i) => i.date && i.time)
     .map((i) => {
@@ -806,10 +978,8 @@ function ManageReservation({ onBack }: { onBack: () => void }) {
 
   function isAddSlotDisabled(t: string): { disabled: boolean; reason: string } {
     if (!selectedAddSvc) return { disabled: false, reason: "" };
-    // Kapacitet
     const taken = addTakenSlots[t] ?? 0;
     if (taken >= Number(selectedAddSvc.max_clients)) return { disabled: true, reason: "— popunjeno" };
-    // Preklapanje sa već rezervisanim uslugama
     if (addDate) {
       const sameDay = existingAsSelectedItems.filter((i) => i.date === addDate);
       const thisStart = timeToMinutes(t);
@@ -827,8 +997,10 @@ function ManageReservation({ onBack }: { onBack: () => void }) {
   return (
     <div style={{ maxWidth: "600px", margin: "0 auto" }}>
       <div style={card}>
-        <button onClick={() => { setMode("lookup"); setReservation(null); setItems([]); setCancelConfirm(false); setActionError(null); setActionSuccess(null); }}
-          style={{ background: "none", border: "none", cursor: "pointer", color: "#f01f72", fontWeight: 700, fontSize: "0.88rem", marginBottom: "1.5rem", padding: 0, fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+        <button
+          onClick={() => { setMode("lookup"); setReservation(null); setItems([]); setCancelConfirm(false); setActionError(null); setActionSuccess(null); }}
+          style={{ background: "none", border: "none", cursor: "pointer", color: "#f01f72", fontWeight: 700, fontSize: "0.88rem", marginBottom: "1.5rem", padding: 0, fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}
+        >
           ← Nazad
         </button>
 
@@ -839,17 +1011,11 @@ function ManageReservation({ onBack }: { onBack: () => void }) {
             </h2>
             <div style={{ fontSize: "0.82rem", color: "#6b2145", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>{reservation.email}</div>
           </div>
-          <span style={{
-            background: isCancelled ? "#fee2e2" : "#d1fae5",
-            color: isCancelled ? "#991b1b" : "#065f46",
-            borderRadius: "999px", padding: "0.3rem 0.85rem",
-            fontSize: "0.78rem", fontWeight: 700,
-          }}>
+          <span style={{ background: isCancelled ? "#fee2e2" : "#d1fae5", color: isCancelled ? "#991b1b" : "#065f46", borderRadius: "999px", padding: "0.3rem 0.85rem", fontSize: "0.78rem", fontWeight: 700 }}>
             {isCancelled ? "Otkazana" : "Aktivna"}
           </span>
         </div>
 
-        {/* Usluge */}
         <div style={{ background: "rgba(255,255,255,0.65)", borderRadius: "18px", border: "1.5px solid rgba(255,61,138,0.15)", padding: "1rem 1.2rem", marginBottom: "1rem" }}>
           <div style={{ fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#f01f72", marginBottom: "0.75rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
             Zakazane usluge
@@ -867,10 +1033,8 @@ function ManageReservation({ onBack }: { onBack: () => void }) {
                 <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
                   <span style={{ fontWeight: 800, fontSize: "0.88rem", color: "#1a0a10" }}>{Number(item.line_total).toLocaleString()} RSD</span>
                   {!isCancelled && (
-                    <button
-                      onClick={() => handleRemoveItem(item.id)} disabled={actionLoading}
-                      style={{ background: "#fee2e2", border: "1.5px solid #fca5a5", borderRadius: "8px", padding: "0.3rem 0.6rem", fontSize: "0.75rem", fontWeight: 700, color: "#991b1b", cursor: "pointer" }}
-                    >
+                    <button onClick={() => handleRemoveItem(item.id)} disabled={actionLoading}
+                      style={{ background: "#fee2e2", border: "1.5px solid #fca5a5", borderRadius: "8px", padding: "0.3rem 0.6rem", fontSize: "0.75rem", fontWeight: 700, color: "#991b1b", cursor: "pointer" }}>
                       Ukloni
                     </button>
                   )}
@@ -884,7 +1048,6 @@ function ManageReservation({ onBack }: { onBack: () => void }) {
           </div>
         </div>
 
-        {/* Dodaj uslugu panel */}
         {!isCancelled && (
           <div style={{ marginBottom: "1rem" }}>
             {!showAddPanel ? (
@@ -896,8 +1059,11 @@ function ManageReservation({ onBack }: { onBack: () => void }) {
                 <div style={{ fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#f01f72", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
                   Dodaj uslugu
                 </div>
-                <select value={addServiceId} onChange={(e) => { setAddServiceId(Number(e.target.value)); setAddDate(""); setAddTime(""); }}
-                  style={{ width: "100%", borderRadius: "12px", background: "white", border: "1.5px solid rgba(255,61,138,0.20)", padding: "0.55rem 0.75rem", fontSize: "0.88rem", outline: "none", boxSizing: "border-box" }}>
+                <select
+                  value={addServiceId}
+                  onChange={(e) => { setAddServiceId(Number(e.target.value)); setAddDate(""); setAddTime(""); }}
+                  style={{ width: "100%", borderRadius: "12px", background: "white", border: "1.5px solid rgba(255,61,138,0.20)", padding: "0.55rem 0.75rem", fontSize: "0.88rem", outline: "none", boxSizing: "border-box" }}
+                >
                   <option value="">-- odaberi uslugu --</option>
                   {catalog.map((cat) => (
                     <optgroup key={cat.id} label={cat.name}>
@@ -907,33 +1073,69 @@ function ManageReservation({ onBack }: { onBack: () => void }) {
                     </optgroup>
                   ))}
                 </select>
+
                 {addServiceId !== "" && (
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.6rem" }}>
+                    {/* Datum — react-datepicker */}
                     <div>
                       <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "#6b2145", marginBottom: "0.3rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Datum</div>
-                      <input type="date" min={todayStr()} value={addDate} onChange={(e) => setAddDate(e.target.value)}
-                        style={{ width: "100%", borderRadius: "12px", background: "white", border: "1.5px solid rgba(255,61,138,0.20)", padding: "0.5rem 0.75rem", fontSize: "0.85rem", outline: "none", boxSizing: "border-box" }} />
+                      <div className="salon-datepicker">
+                        <DatePicker
+                          selected={strToDate(addDate)}
+                          onChange={(date: Date | null) => {
+                            if (!date) { setAddDate(""); setAddTime(""); return; }
+                            setAddDate(dateToStr(date));
+                            setAddTime("");
+                          }}
+                          filterDate={isDateAllowed}
+                          minDate={todayDate()}
+                          dateFormat="dd.MM.yyyy"
+                          placeholderText="Izaberi datum"
+                          popperPlacement="bottom-start"
+                          locale="sr-latn"
+                        />
+                      </div>
                     </div>
+                    {/* Vreme */}
                     <div>
                       <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "#6b2145", marginBottom: "0.3rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Vreme</div>
-                      <select value={addTime} onChange={(e) => setAddTime(e.target.value)}
-                        style={{ width: "100%", borderRadius: "12px", background: "white", border: "1.5px solid rgba(255,61,138,0.20)", padding: "0.5rem 0.75rem", fontSize: "0.85rem", outline: "none", boxSizing: "border-box" }}>
+                      <select
+                        value={addTime} onChange={(e) => setAddTime(e.target.value)}
+                        disabled={!addDate || addSlotRange.closed}
+                        style={{ width: "100%", borderRadius: "12px", background: "white", border: "1.5px solid rgba(255,61,138,0.20)", padding: "0.5rem 0.75rem", fontSize: "0.85rem", outline: "none", boxSizing: "border-box", opacity: (!addDate || addSlotRange.closed) ? 0.5 : 1 }}
+                      >
                         <option value="">-- izaberi --</option>
+                        {addDate && addSlotRange.closed && <option value="" disabled>Salon zatvoren taj dan</option>}
                         {addSlots.map((t) => {
                           const { disabled, reason } = isAddSlotDisabled(t);
+                          const taken = addTakenSlots[t] ?? 0;
+                          const maxClients = selectedAddSvc ? Number(selectedAddSvc.max_clients) : 1;
+                          const partial = !disabled && taken > 0;
+                          let label = t;
+                          if (reason) label += ` ${reason}`;
+                          else if (partial) label += ` — ${maxClients - taken}/${maxClients} slobodno`;
                           return (
-                            <option key={t} value={t} disabled={disabled}>
-                              {t}{reason ? ` ${reason}` : ""}
-                            </option>
+                            <option key={t} value={t} disabled={disabled}>{label}</option>
                           );
                         })}
                       </select>
                     </div>
                   </div>
                 )}
+
+                {addDate && addSlotRange.closed && (
+                  <div style={{ fontSize: "0.78rem", color: "#9a3412", background: "#fff7ed", border: "1.5px solid #fb923c", borderRadius: "10px", padding: "0.45rem 0.75rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+                    🚫 Salon je zatvoren taj dan — izaberi drugi datum.
+                  </div>
+                )}
+
                 <div style={{ display: "flex", gap: "0.6rem" }}>
                   <button onClick={() => { setShowAddPanel(false); setAddServiceId(""); setAddDate(""); setAddTime(""); }} className="btn-secondary" style={{ flex: 1 }}>Otkaži</button>
-                  <button onClick={handleAddItem} className="btn-primary" style={{ flex: 2, opacity: (!addServiceId || !addDate || !addTime) ? 0.5 : 1 }} disabled={!addServiceId || !addDate || !addTime || actionLoading}>
+                  <button
+                    onClick={handleAddItem} className="btn-primary"
+                    style={{ flex: 2, opacity: (!addServiceId || !addDate || !addTime) ? 0.5 : 1 }}
+                    disabled={!addServiceId || !addDate || !addTime || actionLoading || addSlotRange.closed}
+                  >
                     {actionLoading ? "Dodajem…" : "Dodaj"}
                   </button>
                 </div>
@@ -942,7 +1144,6 @@ function ManageReservation({ onBack }: { onBack: () => void }) {
           </div>
         )}
 
-        {/* Akcije i povratne poruke */}
         {actionError && (
           <div style={{ borderRadius: "14px", background: "#fee2e2", border: "1.5px solid #fca5a5", color: "#991b1b", padding: "0.7rem 1rem", fontSize: "0.88rem", marginBottom: "0.75rem" }}>
             ⚠️ {actionError}
@@ -954,7 +1155,6 @@ function ManageReservation({ onBack }: { onBack: () => void }) {
           </div>
         )}
 
-        {/* Otkaži rezervaciju */}
         {!isCancelled && (
           <div style={{ borderTop: "1.5px solid rgba(255,61,138,0.12)", paddingTop: "1rem", marginTop: "0.25rem" }}>
             {!cancelConfirm ? (
@@ -985,20 +1185,22 @@ function ManageReservation({ onBack }: { onBack: () => void }) {
 
 function BookingLanding({ onBook, onManage }: { onBook: () => void; onManage: () => void }) {
   return (
-    <div style={{ maxWidth: "600px", margin: "0 auto" }}>
-      <div style={{ background: "rgba(255,240,246,0.80)", border: "1.5px solid rgba(255,61,138,0.18)", borderRadius: "28px", padding: "2.5rem", textAlign: "center" }}>
-        <div style={{ fontSize: "3.5rem", marginBottom: "1rem" }}>💅</div>
-        <h2 style={{ fontSize: "1.8rem", fontWeight: 800, color: "#1a0a10", marginBottom: "0.4rem" }}>Salon Trač</h2>
-        <p style={{ color: "#6b2145", fontSize: "0.92rem", marginBottom: "2rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
-          Šta želiš da uradiš?
-        </p>
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
-          <button className="btn-primary" onClick={onBook} style={{ width: "100%", fontSize: "1rem", padding: "0.9rem" }}>
-            📅 Rezerviši termin
-          </button>
-          <button className="btn-secondary" onClick={onManage} style={{ width: "100%", fontSize: "1rem", padding: "0.9rem" }}>
-            🔑 Pristupi svojoj rezervaciji
-          </button>
+    <div style={{ minHeight: "70vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ width: "100%", maxWidth: "480px" }}>
+        <div style={{ background: "rgba(255,240,246,0.80)", border: "1.5px solid rgba(255,61,138,0.18)", borderRadius: "28px", padding: "2.5rem", textAlign: "center" }}>
+          <div style={{ fontSize: "3.5rem", marginBottom: "1rem" }}>💅</div>
+          <h2 style={{ fontSize: "1.8rem", fontWeight: 800, color: "#1a0a10", marginBottom: "0.4rem" }}>Salon Trač</h2>
+          <p style={{ color: "#6b2145", fontSize: "0.92rem", marginBottom: "2rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+            Šta želiš da uradiš?
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
+            <button className="btn-primary" onClick={onBook} style={{ width: "100%", fontSize: "1rem", padding: "0.9rem" }}>
+              📅 Rezerviši termin
+            </button>
+            <button className="btn-secondary" onClick={onManage} style={{ width: "100%", fontSize: "1rem", padding: "0.9rem" }}>
+              🔑 Pristupi svojoj rezervaciji
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1017,6 +1219,7 @@ export default function Book() {
   const [step, setStep] = useState(1);
   const [catalog, setCatalog] = useState<Category[]>([]);
   const [currencies, setCurrencies] = useState<string[]>(["RSD"]);
+  const [salonHours, setSalonHours] = useState<Record<number, SalonHour>>({});
   const [customer, setCustomer] = useState<CustomerData>(emptyCustomer);
   const [selected, setSelected] = useState<SelectedItem[]>([]);
   const [currency, setCurrency] = useState("RSD");
@@ -1028,6 +1231,11 @@ export default function Book() {
   useEffect(() => {
     fetch(`${API}/catalog`).then((r) => r.json()).then(setCatalog).catch(() => {});
     fetch(`${API}/currencies`).then((r) => r.json()).then(setCurrencies).catch(() => {});
+    fetch(`${API}/salon-hours`).then((r) => r.json()).then((arr: SalonHour[]) => {
+      const map: Record<number, SalonHour> = {};
+      arr.forEach((h) => { map[h.day_of_week] = h; });
+      setSalonHours(map);
+    }).catch(() => {});
   }, []);
 
   function toggleService(svc: Service) {
@@ -1039,7 +1247,7 @@ export default function Book() {
   }
 
   function updateDate(serviceId: number, date: string) {
-    setSelected((prev) => prev.map((s) => s.service.id === serviceId ? { ...s, date } : s));
+    setSelected((prev) => prev.map((s) => s.service.id === serviceId ? { ...s, date, time: "" } : s));
   }
 
   function updateTime(serviceId: number, time: string) {
@@ -1073,7 +1281,7 @@ export default function Book() {
   }
 
   if (view === "manage") {
-    return <ManageReservation onBack={() => setView("landing")} />;
+    return <ManageReservation onBack={() => setView("landing")} salonHours={salonHours} />;
   }
 
   if (result) {
@@ -1091,27 +1299,33 @@ export default function Book() {
   }
 
   return (
-    <div style={{ maxWidth: "600px", margin: "0 auto" }}>
-      <div style={{ background: "rgba(255,240,246,0.80)", border: "1.5px solid rgba(255,61,138,0.18)", borderRadius: "28px", padding: "2rem 2.5rem" }}>
-        <StepIndicator step={step} />
-        {step === 1 && <Step1 data={customer} onChange={setCustomer} onNext={() => setStep(2)} onBack={() => setView("landing")} />}
-        {step === 2 && (
-          <Step2
-            catalog={catalog} selected={selected} currency={currency}
-            currencies={currencies} promoInput={promoInput}
-            onToggleService={toggleService} onDateChange={updateDate}
-            onTimeChange={updateTime} onCurrencyChange={setCurrency}
-            onPromoChange={setPromoInput} onBack={() => setView("landing")} onNext={() => setStep(3)}
-          />
-        )}
-        {step === 3 && (
-          <Step3
-            customer={customer} selected={selected} currency={currency}
-            promoInput={promoInput} onBack={() => setStep(2)}
-            onConfirm={handleConfirm} loading={loading} error={error}
-          />
-        )}
+    <>
+      {/* Inject datepicker CSS overrides */}
+      <style>{datepickerStyles}</style>
+      <div style={{ maxWidth: "600px", margin: "0 auto" }}>
+        <div style={{ background: "rgba(255,240,246,0.80)", border: "1.5px solid rgba(255,61,138,0.18)", borderRadius: "28px", padding: "2rem 2.5rem" }}>
+          <StepIndicator step={step} />
+          {step === 1 && (
+            <Step1 data={customer} onChange={setCustomer} onNext={() => setStep(2)} onBack={() => setView("landing")} />
+          )}
+          {step === 2 && (
+            <Step2
+              catalog={catalog} selected={selected} currency={currency}
+              currencies={currencies} promoInput={promoInput} salonHours={salonHours}
+              onToggleService={toggleService} onDateChange={updateDate}
+              onTimeChange={updateTime} onCurrencyChange={setCurrency}
+              onPromoChange={setPromoInput} onBack={() => setView("landing")} onNext={() => setStep(3)}
+            />
+          )}
+          {step === 3 && (
+            <Step3
+              customer={customer} selected={selected} currency={currency}
+              promoInput={promoInput} onBack={() => setStep(2)}
+              onConfirm={handleConfirm} loading={loading} error={error}
+            />
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }

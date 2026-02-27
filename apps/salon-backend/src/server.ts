@@ -9,6 +9,10 @@ import { ensureRedis } from "./cache/redis";
 import { getOrSetJSON, delKey } from "./cache/cacheHelpers";
 import { pool } from "./db/pool";
 
+// Fix: PostgreSQL DATE tip ne sme da se konvertuje u JS Date objekat
+import pg from "pg";
+pg.types.setTypeParser(1082, (val: string) => val); // DATE → string "YYYY-MM-DD"
+
 dotenv.config({ path: "./.env" });
 
 const app = express();
@@ -463,6 +467,59 @@ app.put("/currencies", async (req, res) => {
 });
 
 /* ======================
+   SALON HOURS
+====================== */
+app.get("/salon-hours", async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      "SELECT day_of_week, open_time, close_time, is_closed FROM salon_hours ORDER BY day_of_week"
+    );
+    // Konvertuj time u string HH:MM
+    const result = rows.map((r: any) => ({
+      day_of_week: r.day_of_week,
+      open_time:   r.open_time.slice(0, 5),
+      close_time:  r.close_time.slice(0, 5),
+      is_closed:   r.is_closed,
+    }));
+    res.json(result);
+  } catch (err: any) {
+    console.error("GET /salon-hours error:", err?.message);
+    res.status(500).json({ message: "Failed to load salon hours" });
+  }
+});
+
+app.put("/salon-hours", async (req, res) => {
+  try {
+    const { hours } = req.body;
+    // hours = [{ day_of_week, open_time, close_time, is_closed }, ...]
+    if (!Array.isArray(hours) || hours.length !== 7) {
+      return res.status(400).json({ message: "Očekujem niz od 7 dana" });
+    }
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const h of hours) {
+        await client.query(
+          `UPDATE salon_hours SET open_time=$1, close_time=$2, is_closed=$3
+           WHERE day_of_week=$4`,
+          [h.open_time, h.close_time, h.is_closed, h.day_of_week]
+        );
+      }
+      await client.query("COMMIT");
+      res.json({ ok: true });
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (err: any) {
+    console.error("PUT /salon-hours error:", err?.message);
+    res.status(500).json({ message: "Failed to update salon hours" });
+  }
+});
+
+/* ======================
    RESERVATIONS
 ====================== */
 function randomCode(len = 8) {
@@ -490,9 +547,31 @@ app.post("/reservations", async (req, res) => {
       return res.status(400).json({ message: "At least one reservation item is required" });
     }
 
+
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+
+      // Proveri zatvorene dane za svaki item
+      const hoursRes = await client.query(
+        "SELECT day_of_week, is_closed FROM salon_hours"
+      );
+      const closedDays = new Set(
+        hoursRes.rows
+          .filter((r: any) => r.is_closed)
+          .map((r: any) => r.day_of_week)
+      );
+      for (const it of items) {
+        const dow = new Date(it.date + "T00:00:00").getDay();
+        if (closedDays.has(dow)) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({
+            message: `Salon je zatvoren ${new Date(it.date + "T00:00:00").toLocaleDateString("sr-RS", { weekday: "long" })} — izaberi drugi datum.`
+          });
+        }
+      }
+
+
 
       // Promo kod validacija
       let promoDiscount = false;
