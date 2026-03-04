@@ -353,7 +353,6 @@ function isDiscountActive(discountUntil: string | null): boolean {
   return today <= until;
 }
 
-// POST /reservations — kreira novu rezervaciju
 app.post("/reservations", async (req, res) => {
   try {
     const { first_name, last_name, email, phone, address1, postal_code, city, country, currency, promo_code_used, items } = req.body;
@@ -384,14 +383,6 @@ app.post("/reservations", async (req, res) => {
         }
       }
 
-      // ─── Promo kod validacija ──────────────────────────────────────────────
-      // PRAVILA:
-      //   1. Kod mora biti stvarno generisan od sistema (mora postojati u bazi)
-      //   2. Rezervacija čiji je kod ne sme biti otkazana
-      //   3. Kod može biti iskorišćen samo jednom (promo_code_used = false u bazi)
-      //   4. Bilo ko može koristiti kod — i vlasnik i drugi korisnici
-      // BUGFIX: u originalu je bio email check koji je dozvoljavao samo vlasniku
-      //         da ga koristi — to je bilo pogrešno i uklonjeno je.
       let promoDiscount = false;
       let promoReservationId: number | null = null;
 
@@ -400,18 +391,15 @@ app.post("/reservations", async (req, res) => {
           "SELECT id, status, promo_code_used FROM reservations WHERE promo_code = $1",
           [promo_code_used.toUpperCase()]
         );
-        // Kod ne postoji u bazi — odbij (sprečava unos nasumičnih stringova)
         if (promoRes.rows.length === 0) {
           await client.query("ROLLBACK");
           return res.status(400).json({ message: "Promo kod nije pronađen" });
         }
         const promoRow = promoRes.rows[0];
-        // Kod otkazane rezervacije nije važeći
         if (promoRow.status === "cancelled") {
           await client.query("ROLLBACK");
           return res.status(400).json({ message: "Promo kod otkazane rezervacije nije važeći" });
         }
-        // Kod je već jednom iskorišćen
         if (promoRow.promo_code_used) {
           await client.query("ROLLBACK");
           return res.status(400).json({ message: "Promo kod je već iskorišćen" });
@@ -420,7 +408,6 @@ app.post("/reservations", async (req, res) => {
         promoReservationId = promoRow.id;
       }
 
-      // Popust iz settings
       const settingsRes = await client.query("SELECT discount_until FROM settings LIMIT 1");
       const tenPctActive = isDiscountActive(settingsRes.rows[0]?.discount_until ?? null);
 
@@ -462,7 +449,6 @@ app.post("/reservations", async (req, res) => {
 
       await client.query("UPDATE reservations SET total_amount=$1 WHERE id=$2", [total, reservation.id]);
 
-      // Označi promo kod kao iskorišćen
       if (promoReservationId !== null) {
         await client.query("UPDATE reservations SET promo_code_used=TRUE WHERE id=$1", [promoReservationId]);
       }
@@ -490,8 +476,6 @@ app.post("/reservations", async (req, res) => {
   }
 });
 
-// GET /reservations — lista za admin
-// IZMENA: vraća i access_code, promo_code, promo_code_used za admin panel
 app.get("/reservations", async (_req, res) => {
   try {
     const { rows } = await pool.query(
@@ -506,7 +490,6 @@ app.get("/reservations", async (_req, res) => {
   }
 });
 
-// GET /reservations/slots
 app.get("/reservations/slots", async (req, res) => {
   try {
     const { service_id, date } = req.query;
@@ -532,7 +515,6 @@ app.get("/reservations/slots", async (req, res) => {
   }
 });
 
-// POST /reservations/lookup — MORA biti pre /:id rute!
 app.post("/reservations/lookup", async (req, res) => {
   try {
     const { access_code, email } = req.body;
@@ -555,7 +537,6 @@ app.post("/reservations/lookup", async (req, res) => {
   }
 });
 
-// GET /reservations/:id
 app.get("/reservations/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -574,7 +555,6 @@ app.get("/reservations/:id", async (req, res) => {
   }
 });
 
-// DELETE /reservations/:id — samo za admina, trajno briše rezervaciju
 app.delete("/reservations/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -589,7 +569,6 @@ app.delete("/reservations/:id", async (req, res) => {
   }
 });
 
-// POST /reservations/:id/items
 app.post("/reservations/:id/items", async (req, res) => {
   try {
     const { id } = req.params;
@@ -639,7 +618,6 @@ app.post("/reservations/:id/items", async (req, res) => {
   }
 });
 
-// DELETE /reservations/:id/items/:itemId
 app.delete("/reservations/:id/items/:itemId", async (req, res) => {
   try {
     const { id, itemId } = req.params;
@@ -670,7 +648,6 @@ app.delete("/reservations/:id/items/:itemId", async (req, res) => {
   }
 });
 
-// POST /reservations/:id/cancel
 app.post("/reservations/:id/cancel", async (req, res) => {
   try {
     const { id } = req.params;
@@ -687,6 +664,44 @@ app.post("/reservations/:id/cancel", async (req, res) => {
   } catch (err: any) {
     console.error("POST /reservations/:id/cancel error:", err?.message);
     res.status(500).json({ message: "Failed to cancel reservation" });
+  }
+});
+
+/* ======================
+   REPORTING
+====================== */
+app.get("/reports/by-category", async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT c.name AS category, COUNT(ri.id)::int AS count
+      FROM reservation_items ri
+      JOIN services s ON s.id = ri.service_id
+      JOIN categories c ON c.id = s.category_id
+      JOIN reservations r ON r.id = ri.reservation_id
+      WHERE r.status != 'cancelled'
+      GROUP BY c.name
+      ORDER BY count DESC
+    `);
+    res.json(rows);
+  } catch (err: any) {
+    console.error("GET /reports/by-category error:", err?.message);
+    res.status(500).json({ message: "Failed to load report" });
+  }
+});
+
+app.get("/reports/by-date", async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT DATE(created_at)::text AS date, COUNT(id)::int AS count
+      FROM reservations
+      WHERE status != 'cancelled'
+      GROUP BY DATE(created_at)
+      ORDER BY date ASC
+    `);
+    res.json(rows);
+  } catch (err: any) {
+    console.error("GET /reports/by-date error:", err?.message);
+    res.status(500).json({ message: "Failed to load report" });
   }
 });
 
