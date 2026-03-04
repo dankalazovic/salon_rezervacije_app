@@ -328,7 +328,9 @@ function Step1({ data, onChange, onNext, onBack }: {
   const set = (k: keyof CustomerData) => (e: React.ChangeEvent<HTMLInputElement>) =>
     onChange({ ...data, [k]: e.target.value });
 
-  const valid = data.first_name && data.last_name && data.email &&
+  // Email validacija — mora imati @ i tačku posle @
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email);
+  const valid = data.first_name && data.last_name && data.email && emailValid &&
     data.address1 && data.postal_code && data.city && data.country;
 
   return (
@@ -340,7 +342,14 @@ function Step1({ data, onChange, onNext, onBack }: {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.85rem" }}>
         <InputField label="Ime" required placeholder="Ana" value={data.first_name} onChange={set("first_name")} />
         <InputField label="Prezime" required placeholder="Jovanović" value={data.last_name} onChange={set("last_name")} />
-        <InputField label="Email" required type="email" placeholder="ana@example.com" value={data.email} onChange={set("email")} />
+        <div>
+          <InputField label="Email" required type="email" placeholder="ana@gmail.com" value={data.email} onChange={set("email")} />
+          {data.email && !emailValid && (
+            <p style={{ fontSize: "0.75rem", color: "#991b1b", marginTop: "0.25rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+              ⚠️ Unesi ispravan email (npr. ana@gmail.com)
+            </p>
+          )}
+        </div>
         <InputField label="Telefon" type="tel" placeholder="060 123 4567" value={data.phone} onChange={set("phone")} />
         <InputField label="Adresa" required placeholder="Ulica i broj" value={data.address1} onChange={set("address1")} />
         <InputField label="Poštanski broj" required placeholder="11000" value={data.postal_code} onChange={set("postal_code")} />
@@ -497,7 +506,7 @@ function ServiceSlotPicker({
 // ─── Step 2 ───────────────────────────────────────────────────────────────────
 
 function Step2({
-  catalog, selected, currency, currencies, promoInput, salonHours,
+  catalog, selected, currency, currencies, promoInput, salonHours, discountUntil,
   onToggleService, onDateChange, onTimeChange,
   onCurrencyChange, onPromoChange, onBack, onNext,
 }: {
@@ -507,6 +516,7 @@ function Step2({
   currencies: string[];
   promoInput: string;
   salonHours: Record<number, SalonHour>;
+  discountUntil: string | null;
   onToggleService: (svc: Service) => void;
   onDateChange: (id: number, date: string) => void;
   onTimeChange: (id: number, time: string) => void;
@@ -519,12 +529,55 @@ function Step2({
   const conflictError = hasTimeConflict(selected);
   const canProceed = selected.length > 0 && selected.every((s) => s.date && s.time) && !conflictError;
 
+  // Formatiraj datum popusta za prikaz
+  const discountDateFormatted = discountUntil
+    ? new Date(discountUntil + "T00:00:00").toLocaleDateString("sr-RS", { day: "2-digit", month: "2-digit", year: "numeric" })
+    : null;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
       <div>
         <h2 style={{ fontSize: "1.6rem", fontWeight: 800, color: "#1a0a10", marginBottom: "0.3rem" }}>Odaberi usluge 💅</h2>
         <p style={{ color: "#6b2145", fontSize: "0.88rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Klikni na uslugu da je odabereš. Možeš odabrati više.</p>
       </div>
+
+      {/* Baner popusta */}
+      {discountUntil && (
+        <div style={{
+          background: "linear-gradient(135deg, rgba(255,61,138,0.12), rgba(240,31,114,0.08))",
+          border: "1.5px solid rgba(255,61,138,0.35)",
+          borderRadius: "16px",
+          padding: "1rem 1.25rem",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "1rem",
+          flexWrap: "wrap",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+            <span style={{ fontSize: "1.5rem" }}>🎉</span>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: "0.95rem", color: "#f01f72" }}>
+                Popust 10% aktiviran!
+              </div>
+              <div style={{ fontSize: "0.80rem", color: "#6b2145", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif", marginTop: "0.15rem" }}>
+                Važi do <strong>{discountDateFormatted}</strong> — rezerviši odmah i uštedi!
+              </div>
+            </div>
+          </div>
+          <div style={{
+            background: "linear-gradient(135deg, #ff3d8a, #f01f72)",
+            color: "white",
+            borderRadius: "10px",
+            padding: "0.4rem 0.9rem",
+            fontSize: "0.85rem",
+            fontWeight: 800,
+            whiteSpace: "nowrap",
+          }}>
+            − 10%
+          </div>
+        </div>
+      )}
 
       {catalog.length === 0 && <p style={{ color: "#6b2145", fontSize: "0.88rem" }}>Učitavanje kataloga…</p>}
 
@@ -619,13 +672,14 @@ function Step2({
 // ─── Step 3 ───────────────────────────────────────────────────────────────────
 
 function Step3({
-  customer, selected, currency, promoInput,
+  customer, selected, currency, promoInput, discountUntil,
   onBack, onConfirm, loading, error,
 }: {
   customer: CustomerData;
   selected: SelectedItem[];
   currency: string;
   promoInput: string;
+  discountUntil: string | null;
   onBack: () => void;
   onConfirm: () => void;
   loading: boolean;
@@ -641,9 +695,15 @@ function Step3({
   }, [currency]);
 
   const subtotal = selected.reduce((s, i) => s + i.service.price_rsd, 0);
-  const promoDiscount = promoInput.length >= 5 ? Math.round(subtotal * 0.05) : 0;
-  const totalRSD = subtotal - promoDiscount;
+  const discount10 = discountUntil ? Math.round(subtotal * 0.10) : 0;
+  const afterDiscount10 = subtotal - discount10;
+  const promoDiscount = promoInput.length >= 5 ? Math.round(afterDiscount10 * 0.05) : 0;
+  const totalRSD = afterDiscount10 - promoDiscount;
   const totalConverted = currency !== "RSD" ? (totalRSD / rate).toFixed(2) : null;
+
+  const discountDateFormatted = discountUntil
+    ? new Date(discountUntil + "T00:00:00").toLocaleDateString("sr-RS", { day: "2-digit", month: "2-digit", year: "numeric" })
+    : null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
@@ -681,6 +741,12 @@ function Step3({
           <div style={{ display: "flex", justifyContent: "space-between", color: "#6b2145" }}>
             <span>Međuzbir</span><span>{subtotal.toLocaleString()} RSD</span>
           </div>
+          {discount10 > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", color: "#059669", fontWeight: 600 }}>
+              <span>Popust 10% (do {discountDateFormatted})</span>
+              <span>− {discount10.toLocaleString()} RSD</span>
+            </div>
+          )}
           {promoDiscount > 0 && (
             <div style={{ display: "flex", justifyContent: "space-between", color: "#f01f72", fontWeight: 600 }}>
               <span>Promo popust (5%)</span><span>− {promoDiscount.toLocaleString()} RSD</span>
@@ -1211,7 +1277,7 @@ function BookingLanding({ onBook, onManage }: { onBook: () => void; onManage: ()
 
 const emptyCustomer: CustomerData = {
   first_name: "", last_name: "", email: "", phone: "",
-  address1: "", postal_code: "", city: "", country: ""
+  address1: "", postal_code: "11000", city: "Beograd", country: "Srbija"
 };
 
 export default function Book() {
@@ -1227,6 +1293,7 @@ export default function Book() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<BookingResult | null>(null);
+  const [discountUntil, setDiscountUntil] = useState<string | null>(null);
 
   useEffect(() => {
     fetch(`${API}/catalog`).then((r) => r.json()).then(setCatalog).catch(() => {});
@@ -1235,6 +1302,14 @@ export default function Book() {
       const map: Record<number, SalonHour> = {};
       arr.forEach((h) => { map[h.day_of_week] = h; });
       setSalonHours(map);
+    }).catch(() => {});
+    fetch(`${API}/settings`).then((r) => r.json()).then((d) => {
+      if (d.discount_until) {
+        const dateStr = d.discount_until.split("T")[0];
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const until = new Date(dateStr + "T00:00:00");
+        if (today <= until) setDiscountUntil(dateStr);
+      }
     }).catch(() => {});
   }, []);
 
@@ -1312,6 +1387,7 @@ export default function Book() {
             <Step2
               catalog={catalog} selected={selected} currency={currency}
               currencies={currencies} promoInput={promoInput} salonHours={salonHours}
+              discountUntil={discountUntil}
               onToggleService={toggleService} onDateChange={updateDate}
               onTimeChange={updateTime} onCurrencyChange={setCurrency}
               onPromoChange={setPromoInput} onBack={() => setView("landing")} onNext={() => setStep(3)}
@@ -1321,6 +1397,7 @@ export default function Book() {
             <Step3
               customer={customer} selected={selected} currency={currency}
               promoInput={promoInput} onBack={() => setStep(2)}
+              discountUntil={discountUntil}
               onConfirm={handleConfirm} loading={loading} error={error}
             />
           )}

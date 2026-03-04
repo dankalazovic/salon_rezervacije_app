@@ -15,6 +15,7 @@ interface Service {
 interface Reservation {
   id: number; first_name: string; last_name: string;
   email: string; total_amount: number; status: string; created_at: string;
+  access_code: string; promo_code: string; promo_code_used: boolean;
 }
 interface Settings {
   name: string; description: string; working_hours: string; discount_until: string | null;
@@ -65,14 +66,18 @@ function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, [string, string]> = {
-    active: ["#d1fae5", "#065f46"],
+    active:    ["#d1fae5", "#065f46"],
     cancelled: ["#fee2e2", "#991b1b"],
-    pending: ["#fef9c3", "#854d0e"],
+    completed: ["#e0f2fe", "#0369a1"],
+    pending:   ["#fef9c3", "#854d0e"],
   };
   const [bg, color] = map[status] ?? ["#f1f5f9", "#475569"];
+  const labels: Record<string, string> = {
+    active: "Aktivna", cancelled: "Otkazana", completed: "Završena", pending: "Na čekanju"
+  };
   return (
     <span style={{ background: bg, color, borderRadius: "999px", padding: "0.25rem 0.75rem", fontSize: "0.75rem", fontWeight: 700 }}>
-      {{ active: "Aktivna", cancelled: "Otkazana", pending: "Na čekanju" }[status] ?? status}
+      {labels[status] ?? status}
     </span>
   );
 }
@@ -127,32 +132,16 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
             Unesi kredencijale za pristup
           </p>
         </div>
-
-        <div style={{
-          background: "rgba(255,240,246,0.80)",
-          border: "1.5px solid rgba(255,61,138,0.20)",
-          borderRadius: "24px", padding: "2rem",
-        }}>
+        <div style={{ background: "rgba(255,240,246,0.80)", border: "1.5px solid rgba(255,61,138,0.20)", borderRadius: "24px", padding: "2rem" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
             <Field label="Korisničko ime">
-              <Input
-                value={username} onChange={(e) => setUsername(e.target.value)}
-                placeholder="admin" autoComplete="username"
-                onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-              />
+              <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="admin" autoComplete="username" onKeyDown={(e) => e.key === "Enter" && handleLogin()} />
             </Field>
             <Field label="Lozinka">
-              <Input
-                type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••" autoComplete="current-password"
-                onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-              />
+              <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password" onKeyDown={(e) => e.key === "Enter" && handleLogin()} />
             </Field>
             {error && <Toast msg={error} type="err" />}
-            <button
-              onClick={handleLogin} disabled={loading || !username || !password}
-              className="btn-primary" style={{ width: "100%", marginTop: "0.25rem" }}
-            >
+            <button onClick={handleLogin} disabled={loading || !username || !password} className="btn-primary" style={{ width: "100%", marginTop: "0.25rem" }}>
               {loading ? "Prijavljujem…" : "Prijavi se →"}
             </button>
           </div>
@@ -171,15 +160,9 @@ function CategoriesPanel() {
   const [editName, setEditName] = useState("");
   const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" } | null>(null);
 
-  function showToast(msg: string, type: "ok" | "err") {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
-  }
+  function showToast(msg: string, type: "ok" | "err") { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); }
 
-  async function load() {
-    const r = await fetch(`${API}/categories`);
-    setCats(await r.json());
-  }
+  async function load() { const r = await fetch(`${API}/categories`); setCats(await r.json()); }
   useEffect(() => { load(); }, []);
 
   async function add() {
@@ -206,31 +189,18 @@ function CategoriesPanel() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
       <SectionTitle>Kategorije usluga</SectionTitle>
-
-      {/* Dodaj novu */}
       <div style={{ display: "flex", gap: "0.75rem" }}>
-        <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Naziv kategorije…"
-          onKeyDown={(e) => e.key === "Enter" && add()} style={{ flex: 1 }} />
-        <button className="btn-primary" onClick={add} style={{ whiteSpace: "nowrap", padding: "0.65rem 1.4rem" }}>
-          + Dodaj
-        </button>
+        <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Naziv kategorije…" onKeyDown={(e) => e.key === "Enter" && add()} style={{ flex: 1 }} />
+        <button className="btn-primary" onClick={add} style={{ whiteSpace: "nowrap", padding: "0.65rem 1.4rem" }}>+ Dodaj</button>
       </div>
-
       {toast && <Toast {...toast} />}
-
-      {/* Lista */}
       <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
         {cats.length === 0 && <p style={{ color: "#6b2145", fontSize: "0.88rem" }}>Nema kategorija.</p>}
         {cats.map((c) => (
-          <div key={c.id} style={{
-            display: "flex", alignItems: "center", gap: "0.75rem",
-            background: "rgba(255,255,255,0.65)", borderRadius: "14px",
-            border: "1.5px solid rgba(255,61,138,0.15)", padding: "0.7rem 1rem",
-          }}>
+          <div key={c.id} style={{ display: "flex", alignItems: "center", gap: "0.75rem", background: "rgba(255,255,255,0.65)", borderRadius: "14px", border: "1.5px solid rgba(255,61,138,0.15)", padding: "0.7rem 1rem" }}>
             {editId === c.id ? (
               <>
-                <Input value={editName} onChange={(e) => setEditName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && rename(c.id)} style={{ flex: 1 }} autoFocus />
+                <Input value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && rename(c.id)} style={{ flex: 1 }} autoFocus />
                 <button className="btn-primary" onClick={() => rename(c.id)} style={{ padding: "0.45rem 1rem", fontSize: "0.82rem" }}>Sačuvaj</button>
                 <button className="btn-secondary" onClick={() => setEditId(null)} style={{ padding: "0.45rem 0.9rem", fontSize: "0.82rem" }}>Otkaži</button>
               </>
@@ -304,8 +274,6 @@ function ServicesPanel() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
       <SectionTitle>{editId ? "Izmeni uslugu" : "Dodaj uslugu"}</SectionTitle>
-
-      {/* Forma */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.85rem" }}>
         <Field label="Kategorija *">
           <Select value={form.category_id} onChange={setF("category_id")}>
@@ -313,56 +281,28 @@ function ServicesPanel() {
             {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
         </Field>
-        <Field label="Naziv *">
-          <Input value={form.name} onChange={setF("name")} placeholder="npr. Manikir" />
-        </Field>
-        <Field label="Trajanje (min) *">
-          <Input type="number" value={form.duration_minutes} onChange={setF("duration_minutes")} min={5} />
-        </Field>
-        <Field label="Cena (RSD) *">
-          <Input type="number" value={form.price_rsd} onChange={setF("price_rsd")} min={0} />
-        </Field>
-        <Field label="Maks. klijenata po terminu">
-          <Input type="number" value={form.max_clients} onChange={setF("max_clients")} min={1} />
-        </Field>
+        <Field label="Naziv *"><Input value={form.name} onChange={setF("name")} placeholder="npr. Manikir" /></Field>
+        <Field label="Trajanje (min) *"><Input type="number" value={form.duration_minutes} onChange={setF("duration_minutes")} min={5} /></Field>
+        <Field label="Cena (RSD) *"><Input type="number" value={form.price_rsd} onChange={setF("price_rsd")} min={0} /></Field>
+        <Field label="Maks. klijenata po terminu"><Input type="number" value={form.max_clients} onChange={setF("max_clients")} min={1} /></Field>
         <div />
-        <Field label="Početak prvog termina">
-          <Input type="time" value={form.slot_start} onChange={setF("slot_start")} />
-        </Field>
-        <Field label="Kraj poslednjeg termina">
-          <Input type="time" value={form.slot_end} onChange={setF("slot_end")} />
-        </Field>
+        <Field label="Početak prvog termina"><Input type="time" value={form.slot_start} onChange={setF("slot_start")} /></Field>
+        <Field label="Kraj poslednjeg termina"><Input type="time" value={form.slot_end} onChange={setF("slot_end")} /></Field>
         <div style={{ gridColumn: "1 / -1" }}>
-          <Field label="Opis">
-            <Textarea value={form.description} onChange={setF("description")} placeholder="Kratak opis usluge…" />
-          </Field>
+          <Field label="Opis"><Textarea value={form.description} onChange={setF("description")} placeholder="Kratak opis usluge…" /></Field>
         </div>
       </div>
-
       {toast && <Toast {...toast} />}
-
       <div style={{ display: "flex", gap: "0.75rem" }}>
-        <button className="btn-primary" onClick={save} style={{ flex: 1 }}>
-          {editId ? "💾 Sačuvaj izmene" : "+ Dodaj uslugu"}
-        </button>
-        {editId && (
-          <button className="btn-secondary" onClick={() => { setEditId(null); setForm({ ...emptyService }); }}>
-            Otkaži
-          </button>
-        )}
+        <button className="btn-primary" onClick={save} style={{ flex: 1 }}>{editId ? "💾 Sačuvaj izmene" : "+ Dodaj uslugu"}</button>
+        {editId && <button className="btn-secondary" onClick={() => { setEditId(null); setForm({ ...emptyService }); }}>Otkaži</button>}
       </div>
-
-      {/* Lista usluga */}
       <div style={{ borderTop: "1.5px solid rgba(255,61,138,0.12)", paddingTop: "1.25rem" }}>
         <div className="section-label" style={{ marginBottom: "1rem" }}>Sve usluge</div>
         <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
           {services.length === 0 && <p style={{ color: "#6b2145", fontSize: "0.88rem" }}>Nema usluga.</p>}
           {services.map((s) => (
-            <div key={s.id} style={{
-              display: "flex", alignItems: "center", gap: "0.75rem",
-              background: "rgba(255,255,255,0.65)", borderRadius: "14px",
-              border: "1.5px solid rgba(255,61,138,0.15)", padding: "0.7rem 1rem",
-            }}>
+            <div key={s.id} style={{ display: "flex", alignItems: "center", gap: "0.75rem", background: "rgba(255,255,255,0.65)", borderRadius: "14px", border: "1.5px solid rgba(255,61,138,0.15)", padding: "0.7rem 1rem" }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 700, fontSize: "0.92rem", color: "#1a0a10" }}>{s.name}</div>
                 <div style={{ fontSize: "0.78rem", color: "#6b2145", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
@@ -392,10 +332,7 @@ function CurrenciesPanel() {
 
   useEffect(() => {
     fetch(`${API}/currencies`).then((r) => r.json()).then(setSelected);
-    fetch(`${API}/settings`).then((r) => r.json()).then((d) => setSettings({
-      ...d,
-      discount_until: d.discount_until ? d.discount_until.split("T")[0] : ""
-    }));
+    fetch(`${API}/settings`).then((r) => r.json()).then((d) => setSettings({ ...d, discount_until: d.discount_until ? d.discount_until.split("T")[0] : "" }));
   }, []);
 
   function toggleCurrency(code: string) {
@@ -439,25 +376,14 @@ function CurrenciesPanel() {
           ))}
         </div>
         {toast && <Toast {...toast} />}
-        <button className="btn-primary" onClick={saveCurrencies} disabled={saving} style={{ marginTop: "0.5rem" }}>
-          Sačuvaj valute
-        </button>
+        <button className="btn-primary" onClick={saveCurrencies} disabled={saving} style={{ marginTop: "0.5rem" }}>Sačuvaj valute</button>
       </div>
-
       <div style={{ borderTop: "1.5px solid rgba(255,61,138,0.12)", paddingTop: "1.5rem" }}>
         <SectionTitle>Popust 10% važi do</SectionTitle>
         <div style={{ maxWidth: "320px", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-          <Input
-            type="date"
-            value={settings.discount_until ?? ""}
-            onChange={(e) => setSettings((p) => ({ ...p, discount_until: e.target.value }))}
-          />
-          <p style={{ fontSize: "0.8rem", color: "#6b2145", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
-            Ostavi prazno ako ne želiš aktivni popust.
-          </p>
-          <button className="btn-primary" onClick={saveDiscount} disabled={saving}>
-            Sačuvaj datum popusta
-          </button>
+          <Input type="date" value={settings.discount_until ?? ""} onChange={(e) => setSettings((p) => ({ ...p, discount_until: e.target.value }))} />
+          <p style={{ fontSize: "0.8rem", color: "#6b2145", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Ostavi prazno ako ne želiš aktivni popust.</p>
+          <button className="btn-primary" onClick={saveDiscount} disabled={saving}>Sačuvaj datum popusta</button>
         </div>
       </div>
     </div>
@@ -496,17 +422,15 @@ function SettingsPanel() {
       <Field label="Radno vreme"><Input value={form.working_hours} onChange={setF("working_hours")} placeholder="Pon–Pet 09:00–18:00" /></Field>
       <Field label="Popust 10% važi do">
         <Input type="date" value={form.discount_until} onChange={setF("discount_until")} />
-        <p style={{ fontSize: "0.78rem", color: "#6b2145", marginTop: "0.3rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
-          Ostavi prazno ako ne želiš aktivni popust.
-        </p>
+        <p style={{ fontSize: "0.78rem", color: "#6b2145", marginTop: "0.3rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Ostavi prazno ako ne želiš aktivni popust.</p>
       </Field>
       {toast && <Toast {...toast} />}
-      <button className="btn-primary" onClick={save} disabled={saving} style={{ marginTop: "0.25rem" }}>
-        {saving ? "Čuvam…" : "💾 Sačuvaj podešavanja"}
-      </button>
+      <button className="btn-primary" onClick={save} disabled={saving} style={{ marginTop: "0.25rem" }}>{saving ? "Čuvam…" : "💾 Sačuvaj podešavanja"}</button>
     </div>
   );
 }
+
+// ─── REZERVACIJE ─────────────────────────────────────────────────────────────
 
 interface ReservationItem {
   id: number;
@@ -517,10 +441,11 @@ interface ReservationItem {
   line_total: number;
 }
 
-function ReservationRow({ r, index }: { r: Reservation; index: number }) {
+function ReservationRow({ r, index, onDeleted }: { r: Reservation; index: number; onDeleted: (id: number) => void }) {
   const [expanded, setExpanded] = useState(false);
   const [items, setItems] = useState<ReservationItem[] | null>(null);
   const [loadingItems, setLoadingItems] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   async function toggleExpand() {
     if (!expanded && items === null) {
@@ -538,6 +463,22 @@ function ReservationRow({ r, index }: { r: Reservation; index: number }) {
     setExpanded((v) => !v);
   }
 
+  async function handleDelete() {
+    if (!confirm(`Obrisati rezervaciju #${r.id} (${r.first_name} ${r.last_name})? Ova akcija je trajna.`)) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`${API}/reservations/${r.id}`, { method: "DELETE" });
+      if (res.ok) onDeleted(r.id);
+    } catch {
+      alert("Greška pri brisanju");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  // Formatiraj datum kreiranja
+  const createdDate = new Date(r.created_at).toLocaleDateString("sr-RS", { day: "2-digit", month: "2-digit", year: "numeric" });
+
   return (
     <div style={{
       background: "rgba(255,255,255,0.65)", borderRadius: "16px",
@@ -545,28 +486,29 @@ function ReservationRow({ r, index }: { r: Reservation; index: number }) {
       overflow: "hidden", transition: "border-color 0.2s",
     }}>
       {/* Glavni red */}
-      <div style={{
-        padding: "0.85rem 1.1rem",
-        display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap",
-      }}>
-        <div style={{
-          width: "36px", height: "36px", borderRadius: "12px", flexShrink: 0,
-          background: "rgba(255,61,138,0.10)", display: "flex", alignItems: "center",
-          justifyContent: "center", fontSize: "0.78rem", fontWeight: 800, color: "#f01f72",
-        }}>
+      <div style={{ padding: "0.85rem 1.1rem", display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
+        {/* Broj */}
+        <div style={{ width: "36px", height: "36px", borderRadius: "12px", flexShrink: 0, background: "rgba(255,61,138,0.10)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.78rem", fontWeight: 800, color: "#f01f72" }}>
           {index + 1}
         </div>
+
+        {/* Ime i email */}
         <div style={{ flex: 1, minWidth: "160px" }}>
           <div style={{ fontWeight: 700, fontSize: "0.92rem", color: "#1a0a10" }}>{r.first_name} {r.last_name}</div>
           <div style={{ fontSize: "0.78rem", color: "#6b2145", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>{r.email}</div>
         </div>
+
+        {/* Iznos i datum */}
         <div style={{ textAlign: "right" }}>
           <div style={{ fontWeight: 800, fontSize: "0.92rem", color: "#1a0a10" }}>{Number(r.total_amount).toLocaleString()} RSD</div>
           <div style={{ fontSize: "0.75rem", color: "#9ca3af", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
-            {new Date(r.created_at).toLocaleDateString("sr-RS")}
+            Zakazano: {createdDate}
           </div>
         </div>
+
         <StatusBadge status={r.status} />
+
+        {/* Više info dugme */}
         <button
           onClick={toggleExpand}
           style={{
@@ -581,15 +523,51 @@ function ReservationRow({ r, index }: { r: Reservation; index: number }) {
         >
           {loadingItems ? "…" : expanded ? "▲ Sakrij" : "▼ Više info"}
         </button>
+
+        {/* Dugme obrisi */}
+        <button
+          onClick={handleDelete}
+          disabled={deleting}
+          style={{
+            background: "#fee2e2", border: "1.5px solid #fca5a5",
+            borderRadius: "10px", padding: "0.4rem 0.75rem",
+            fontSize: "0.78rem", fontWeight: 700, cursor: "pointer",
+            color: "#991b1b", flexShrink: 0,
+            fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif",
+            opacity: deleting ? 0.5 : 1,
+          }}
+        >
+          {deleting ? "…" : "🗑 Obriši"}
+        </button>
       </div>
 
       {/* Expandovani detalji */}
       {expanded && (
-        <div style={{
-          borderTop: "1.5px solid rgba(255,61,138,0.12)",
-          padding: "1rem 1.1rem",
-          background: "rgba(255,61,138,0.03)",
-        }}>
+        <div style={{ borderTop: "1.5px solid rgba(255,61,138,0.12)", padding: "1rem 1.1rem", background: "rgba(255,61,138,0.03)" }}>
+
+          {/* Kodovi */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.6rem", marginBottom: "1rem" }}>
+            <div style={{ background: "rgba(255,255,255,0.80)", borderRadius: "12px", padding: "0.7rem 1rem", border: "1.5px solid rgba(255,61,138,0.12)" }}>
+              <div style={{ fontSize: "0.68rem", fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#f01f72", marginBottom: "0.2rem" }}>Kod za izmenu</div>
+              <div style={{ fontWeight: 800, fontSize: "0.95rem", color: "#1a0a10", letterSpacing: "0.05em", fontFamily: "monospace" }}>{r.access_code}</div>
+            </div>
+            <div style={{ background: "rgba(255,255,255,0.80)", borderRadius: "12px", padding: "0.7rem 1rem", border: "1.5px solid rgba(255,61,138,0.12)" }}>
+              <div style={{ fontSize: "0.68rem", fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#f01f72", marginBottom: "0.2rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>Promo kod</span>
+                <span style={{
+                  background: r.promo_code_used ? "#fee2e2" : "#d1fae5",
+                  color: r.promo_code_used ? "#991b1b" : "#065f46",
+                  borderRadius: "999px", padding: "0.1rem 0.5rem",
+                  fontSize: "0.65rem", fontWeight: 700,
+                }}>
+                  {r.promo_code_used ? "Iskorišćen" : "Nije iskorišćen"}
+                </span>
+              </div>
+              <div style={{ fontWeight: 800, fontSize: "0.95rem", color: "#1a0a10", letterSpacing: "0.05em", fontFamily: "monospace" }}>{r.promo_code}</div>
+            </div>
+          </div>
+
+          {/* Usluge */}
           {loadingItems && <p style={{ fontSize: "0.82rem", color: "#6b2145" }}>Učitavanje usluga…</p>}
           {!loadingItems && items && items.length === 0 && (
             <p style={{ fontSize: "0.82rem", color: "#9ca3af" }}>Nema usluga za ovu rezervaciju.</p>
@@ -600,12 +578,7 @@ function ReservationRow({ r, index }: { r: Reservation; index: number }) {
                 Zakazane usluge
               </div>
               {items.map((item) => (
-                <div key={item.id} style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "center",
-                  background: "rgba(255,255,255,0.70)", borderRadius: "12px",
-                  padding: "0.6rem 0.9rem", gap: "1rem", flexWrap: "wrap",
-                  border: "1.5px solid rgba(255,61,138,0.10)",
-                }}>
+                <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(255,255,255,0.70)", borderRadius: "12px", padding: "0.6rem 0.9rem", gap: "1rem", flexWrap: "wrap", border: "1.5px solid rgba(255,61,138,0.10)" }}>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: "0.88rem", color: "#1a0a10" }}>{item.service_name}</div>
                     <div style={{ fontSize: "0.75rem", color: "#6b2145", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
@@ -638,6 +611,10 @@ function ReservationsPanel() {
       .catch(() => setLoading(false));
   }, []);
 
+  function handleDeleted(id: number) {
+    setReservations((prev) => prev.filter((r) => r.id !== id));
+  }
+
   if (loading) return <p style={{ color: "#6b2145" }}>Učitavanje…</p>;
 
   return (
@@ -649,7 +626,7 @@ function ReservationsPanel() {
       {reservations.length === 0 && <p style={{ color: "#6b2145", fontSize: "0.88rem" }}>Nema rezervacija.</p>}
       <div style={{ display: "flex", flexDirection: "column", gap: "0.65rem" }}>
         {reservations.map((r, i) => (
-          <ReservationRow key={r.id} r={r} index={i} />
+          <ReservationRow key={r.id} r={r} index={i} onDeleted={handleDeleted} />
         ))}
       </div>
     </div>
@@ -665,18 +642,11 @@ interface SalonHour {
   is_closed: boolean;
 }
 
-// 0=Ned, 1=Pon, 2=Uto, 3=Sre, 4=Čet, 5=Pet, 6=Sub — mora da odgovara JavaScript getDay()
 const DAY_NAMES: Record<number, string> = {
-  0: "Nedelja",
-  1: "Ponedeljak",
-  2: "Utorak",
-  3: "Sreda",
-  4: "Četvrtak",
-  5: "Petak",
-  6: "Subota",
+  0: "Nedelja", 1: "Ponedeljak", 2: "Utorak", 3: "Sreda",
+  4: "Četvrtak", 5: "Petak", 6: "Subota",
 };
 
-// Sortiraj da se prikazuje Pon-Ned redosled (1,2,3,4,5,6,0)
 const DISPLAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
 function SalonHoursPanel() {
@@ -684,29 +654,20 @@ function SalonHoursPanel() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" } | null>(null);
 
-  function showToast(msg: string, type: "ok" | "err") {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
-  }
+  function showToast(msg: string, type: "ok" | "err") { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); }
 
   useEffect(() => {
     fetch(`${API}/salon-hours`).then((r) => r.json()).then(setHours).catch(() => {});
   }, []);
 
   function update(dayIndex: number, field: keyof SalonHour, value: any) {
-    setHours((prev) =>
-      prev.map((h) => h.day_of_week === dayIndex ? { ...h, [field]: value } : h)
-    );
+    setHours((prev) => prev.map((h) => h.day_of_week === dayIndex ? { ...h, [field]: value } : h));
   }
 
   async function save() {
     setSaving(true);
     try {
-      const r = await fetch(`${API}/salon-hours`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hours }),
-      });
+      const r = await fetch(`${API}/salon-hours`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hours }) });
       if (r.ok) showToast("Radno vreme sačuvano!", "ok");
       else showToast("Greška pri čuvanju", "err");
     } catch {
@@ -721,55 +682,25 @@ function SalonHoursPanel() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
       <SectionTitle>Radno vreme salona</SectionTitle>
-      
-
       <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
         {DISPLAY_ORDER.map((dow) => {
           const h = hours.find((x) => x.day_of_week === dow);
           if (!h) return null;
           return (
-            <div key={h.day_of_week} style={{
-              display: "grid", gridTemplateColumns: "110px 1fr 1fr auto",
-              alignItems: "center", gap: "0.75rem",
-              background: h.is_closed ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.65)",
-              borderRadius: "14px", border: "1.5px solid rgba(255,61,138,0.15)",
-              padding: "0.65rem 1rem",
-              opacity: h.is_closed ? 0.6 : 1,
-            }}>
-              <span style={{ fontWeight: 700, fontSize: "0.88rem", color: "#1a0a10" }}>
-                {DAY_NAMES[h.day_of_week]}
-              </span>
-              <input
-                type="time" value={h.open_time} disabled={h.is_closed}
-                onChange={(e) => update(h.day_of_week, "open_time", e.target.value)}
-                style={{ ...inputStyle, opacity: h.is_closed ? 0.4 : 1 }}
-              />
-              <input
-                type="time" value={h.close_time} disabled={h.is_closed}
-                onChange={(e) => update(h.day_of_week, "close_time", e.target.value)}
-                style={{ ...inputStyle, opacity: h.is_closed ? 0.4 : 1 }}
-              />
+            <div key={h.day_of_week} style={{ display: "grid", gridTemplateColumns: "110px 1fr 1fr auto", alignItems: "center", gap: "0.75rem", background: h.is_closed ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.65)", borderRadius: "14px", border: "1.5px solid rgba(255,61,138,0.15)", padding: "0.65rem 1rem", opacity: h.is_closed ? 0.6 : 1 }}>
+              <span style={{ fontWeight: 700, fontSize: "0.88rem", color: "#1a0a10" }}>{DAY_NAMES[h.day_of_week]}</span>
+              <input type="time" value={h.open_time} disabled={h.is_closed} onChange={(e) => update(h.day_of_week, "open_time", e.target.value)} style={{ ...inputStyle, opacity: h.is_closed ? 0.4 : 1 }} />
+              <input type="time" value={h.close_time} disabled={h.is_closed} onChange={(e) => update(h.day_of_week, "close_time", e.target.value)} style={{ ...inputStyle, opacity: h.is_closed ? 0.4 : 1 }} />
               <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", whiteSpace: "nowrap" }}>
-                <input
-                  type="checkbox" id={`closed-${h.day_of_week}`}
-                  checked={h.is_closed}
-                  onChange={(e) => update(h.day_of_week, "is_closed", e.target.checked)}
-                  style={{ accentColor: "#f01f72", width: "16px", height: "16px", cursor: "pointer" }}
-                />
-                <label htmlFor={`closed-${h.day_of_week}`} style={{ fontSize: "0.78rem", fontWeight: 600, color: "#6b2145", cursor: "pointer", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
-                  Zatvoreno
-                </label>
+                <input type="checkbox" id={`closed-${h.day_of_week}`} checked={h.is_closed} onChange={(e) => update(h.day_of_week, "is_closed", e.target.checked)} style={{ accentColor: "#f01f72", width: "16px", height: "16px", cursor: "pointer" }} />
+                <label htmlFor={`closed-${h.day_of_week}`} style={{ fontSize: "0.78rem", fontWeight: 600, color: "#6b2145", cursor: "pointer", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>Zatvoreno</label>
               </div>
             </div>
           );
         })}
       </div>
-
       {toast && <Toast {...toast} />}
-
-      <button className="btn-primary" onClick={save} disabled={saving}>
-        {saving ? "Čuvam…" : "💾 Sačuvaj radno vreme"}
-      </button>
+      <button className="btn-primary" onClick={save} disabled={saving}>{saving ? "Čuvam…" : "💾 Sačuvaj radno vreme"}</button>
     </div>
   );
 }
@@ -779,24 +710,22 @@ function SalonHoursPanel() {
 type Panel = "categories" | "services" | "currencies" | "hours" | "settings" | "reservations";
 
 const MENU: { key: Panel; label: string; icon: string }[] = [
-  { key: "categories",   label: "Kategorije usluga",  icon: "🗂️" },
-  { key: "services",     label: "Usluge",              icon: "💅" },
-  { key: "currencies",   label: "Valute & popust",     icon: "💱" },
-  { key: "hours",        label: "Radno vreme",         icon: "🕐" }, 
+  { key: "categories",   label: "Kategorije usluga",   icon: "🗂️" },
+  { key: "services",     label: "Usluge",               icon: "💅" },
+  { key: "currencies",   label: "Valute & popust",      icon: "💱" },
+  { key: "hours",        label: "Radno vreme",          icon: "🕐" },
   { key: "settings",     label: "Osnovna podešavanja",  icon: "⚙️" },
-  { key: "reservations", label: "Rezervacije",         icon: "📋" },
+  { key: "reservations", label: "Rezervacije",          icon: "📋" },
 ];
 
 export default function Admin() {
   const [loggedIn, setLoggedIn] = useState(() => localStorage.getItem("adminLoggedIn") === "true");
-  console.log("Admin rendered, loggedIn:", loggedIn);
   const [active, setActive] = useState<Panel | null>(null);
 
   if (!loggedIn) return <LoginScreen onLogin={() => { setLoggedIn(true); localStorage.setItem("adminLoggedIn", "true"); }} />;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-      {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
         <div>
           <div className="section-label" style={{ marginBottom: "0.3rem" }}>Salon Trač</div>
@@ -808,33 +737,11 @@ export default function Admin() {
       </div>
 
       <div style={{ display: "flex", gap: "1.25rem", alignItems: "flex-start", flexWrap: "wrap" }}>
-
-        {/* Sidebar meni */}
-        <div style={{
-          background: "rgba(255,240,246,0.80)",
-          border: "1.5px solid rgba(255,61,138,0.18)",
-          borderRadius: "24px", padding: "1.25rem",
-          display: "flex", flexDirection: "column", gap: "0.5rem",
-          minWidth: "220px", flexShrink: 0,
-        }}>
+        {/* Sidebar */}
+        <div style={{ background: "rgba(255,240,246,0.80)", border: "1.5px solid rgba(255,61,138,0.18)", borderRadius: "24px", padding: "1.25rem", display: "flex", flexDirection: "column", gap: "0.5rem", minWidth: "220px", flexShrink: 0 }}>
           <div className="section-label" style={{ marginBottom: "0.5rem", paddingLeft: "0.25rem" }}>Opcije</div>
           {MENU.map((m) => (
-            <button
-              key={m.key}
-              onClick={() => setActive(active === m.key ? null : m.key)}
-              style={{
-                display: "flex", alignItems: "center", gap: "0.65rem",
-                padding: "0.75rem 1rem", borderRadius: "14px",
-                background: active === m.key ? "linear-gradient(135deg,#ff3d8a,#f01f72)" : "rgba(255,255,255,0.70)",
-                border: `1.5px solid ${active === m.key ? "transparent" : "rgba(255,61,138,0.18)"}`,
-                color: active === m.key ? "white" : "#1a0a10",
-                fontWeight: 600, fontSize: "0.88rem", cursor: "pointer",
-                boxShadow: active === m.key ? "0 6px 18px rgba(255,61,138,0.25)" : "none",
-                transition: "all 0.2s",
-                fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif",
-                textAlign: "left",
-              }}
-            >
+            <button key={m.key} onClick={() => setActive(active === m.key ? null : m.key)} style={{ display: "flex", alignItems: "center", gap: "0.65rem", padding: "0.75rem 1rem", borderRadius: "14px", background: active === m.key ? "linear-gradient(135deg,#ff3d8a,#f01f72)" : "rgba(255,255,255,0.70)", border: `1.5px solid ${active === m.key ? "transparent" : "rgba(255,61,138,0.18)"}`, color: active === m.key ? "white" : "#1a0a10", fontWeight: 600, fontSize: "0.88rem", cursor: "pointer", boxShadow: active === m.key ? "0 6px 18px rgba(255,61,138,0.25)" : "none", transition: "all 0.2s", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif", textAlign: "left" }}>
               <span style={{ fontSize: "1.1rem" }}>{m.icon}</span>
               {m.label}
             </button>
@@ -843,31 +750,18 @@ export default function Admin() {
 
         {/* Sadržaj */}
         {active && (
-          <div style={{
-            flex: 1, minWidth: "300px",
-            background: "rgba(255,240,246,0.80)",
-            border: "1.5px solid rgba(255,61,138,0.18)",
-            borderRadius: "24px", padding: "1.75rem 2rem",
-          }}>
+          <div style={{ flex: 1, minWidth: "300px", background: "rgba(255,240,246,0.80)", border: "1.5px solid rgba(255,61,138,0.18)", borderRadius: "24px", padding: "1.75rem 2rem" }}>
             {active === "categories"   && <CategoriesPanel />}
             {active === "services"     && <ServicesPanel />}
             {active === "currencies"   && <CurrenciesPanel />}
-            {active === "hours" && <SalonHoursPanel />}
+            {active === "hours"        && <SalonHoursPanel />}
             {active === "settings"     && <SettingsPanel />}
             {active === "reservations" && <ReservationsPanel />}
           </div>
         )}
 
-        {/* Placeholder kad ništa nije izabrano */}
         {!active && (
-          <div style={{
-            flex: 1, minWidth: "300px", minHeight: "200px",
-            background: "rgba(255,240,246,0.50)",
-            border: "1.5px dashed rgba(255,61,138,0.25)",
-            borderRadius: "24px", padding: "2rem",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#6b2145", fontSize: "0.93rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif"
-          }}>
+          <div style={{ flex: 1, minWidth: "300px", minHeight: "200px", background: "rgba(255,240,246,0.50)", border: "1.5px dashed rgba(255,61,138,0.25)", borderRadius: "24px", padding: "2rem", display: "flex", alignItems: "center", justifyContent: "center", color: "#6b2145", fontSize: "0.93rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
             ← Izaberi opciju iz menija
           </div>
         )}

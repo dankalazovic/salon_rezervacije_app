@@ -9,9 +9,8 @@ import { ensureRedis } from "./cache/redis";
 import { getOrSetJSON, delKey } from "./cache/cacheHelpers";
 import { pool } from "./db/pool";
 
-// Fix: PostgreSQL DATE tip ne sme da se konvertuje u JS Date objekat
 import pg from "pg";
-pg.types.setTypeParser(1082, (val: string) => val); // DATE → string "YYYY-MM-DD"
+pg.types.setTypeParser(1082, (val: string) => val);
 
 dotenv.config({ path: "./.env" });
 
@@ -29,186 +28,10 @@ const swaggerSpec = swaggerJsdoc({
     openapi: "3.0.0",
     info: { title: "Salon API", version: "1.0.0", description: "Salon reservation backend API" },
     servers: [{ url: `http://localhost:${PORT}` }],
-    paths: {
-      "/health": { get: { summary: "Health check", responses: { "200": { description: "OK" } } } },
-      "/login": {
-        post: {
-          summary: "Admin login",
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    username: { type: "string", example: "admin" },
-                    password: { type: "string", example: "admin" }
-                  },
-                  required: ["username", "password"]
-                }
-              }
-            }
-          },
-          responses: { "200": { description: "Login OK" }, "401": { description: "Invalid credentials" } }
-        }
-      },
-      "/settings": {
-        get: { summary: "Get salon settings", responses: { "200": { description: "Settings object" } } },
-        put: {
-          summary: "Update salon settings",
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    name: { type: "string" },
-                    description: { type: "string" },
-                    working_hours: { type: "string" },
-                    discount_until: { type: "string", example: "2026-12-31" }
-                  }
-                }
-              }
-            }
-          },
-          responses: { "200": { description: "Updated" } }
-        }
-      },
-      "/catalog": { get: { summary: "Get catalog (categories + services)", responses: { "200": { description: "Catalog" } } } },
-      "/categories": {
-        get: { summary: "List categories", responses: { "200": { description: "Categories" } } },
-        post: {
-          summary: "Create category",
-          requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] } } } },
-          responses: { "201": { description: "Created" } }
-        }
-      },
-      "/categories/{id}": {
-        put: {
-          summary: "Rename category",
-          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
-          requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] } } } },
-          responses: { "200": { description: "Updated" } }
-        },
-        delete: {
-          summary: "Delete category",
-          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
-          responses: { "200": { description: "Deleted" } }
-        }
-      },
-      "/services": {
-        post: {
-          summary: "Create service",
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    category_id: { type: "integer" },
-                    name: { type: "string" },
-                    description: { type: "string" },
-                    duration_minutes: { type: "integer" },
-                    price_rsd: { type: "number" },
-                    max_clients: { type: "integer" },
-                    slot_start: { type: "string", example: "09:00" },
-                    slot_end: { type: "string", example: "18:00" }
-                  },
-                  required: ["category_id", "name", "duration_minutes", "price_rsd"]
-                }
-              }
-            }
-          },
-          responses: { "201": { description: "Created" } }
-        }
-      },
-      "/services/{id}": {
-        put: {
-          summary: "Update service",
-          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    category_id: { type: "integer" },
-                    name: { type: "string" },
-                    description: { type: "string" },
-                    duration_minutes: { type: "integer" },
-                    price_rsd: { type: "number" },
-                    max_clients: { type: "integer" },
-                    slot_start: { type: "string" },
-                    slot_end: { type: "string" }
-                  }
-                }
-              }
-            }
-          },
-          responses: { "200": { description: "Updated" } }
-        },
-        delete: {
-          summary: "Delete service",
-          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
-          responses: { "200": { description: "Deleted" } }
-        }
-      },
-      "/currencies": {
-        get: { summary: "List allowed currencies", responses: { "200": { description: "Currencies" } } },
-        put: {
-          summary: "Set allowed currencies",
-          requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { codes: { type: "array", items: { type: "string" } } }, required: ["codes"] } } } },
-          responses: { "200": { description: "Updated" } }
-        }
-      },
-      "/reservations": {
-        get: { summary: "List reservations (admin)", responses: { "200": { description: "List" } } },
-        post: {
-          summary: "Create reservation",
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    first_name: { type: "string" }, last_name: { type: "string" },
-                    email: { type: "string" }, phone: { type: "string" },
-                    address1: { type: "string" }, postal_code: { type: "string" },
-                    city: { type: "string" }, country: { type: "string" },
-                    currency: { type: "string" }, promo_code_used: { type: "string" },
-                    items: { type: "array", items: { type: "object", properties: { service_id: { type: "integer" }, date: { type: "string" }, time: { type: "string" } } } }
-                  }
-                }
-              }
-            }
-          },
-          responses: { "201": { description: "Created" }, "400": { description: "Error" } }
-        }
-      },
-      "/reservations/lookup": {
-        post: {
-          summary: "Lookup reservation by access_code + email",
-          requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { access_code: { type: "string" }, email: { type: "string" } } } } } },
-          responses: { "200": { description: "Found" }, "404": { description: "Not found" } }
-        }
-      },
-      "/reservations/{id}/cancel": {
-        post: {
-          summary: "Cancel reservation",
-          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
-          requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { access_code: { type: "string" }, email: { type: "string" } } } } } },
-          responses: { "200": { description: "Cancelled" }, "400": { description: "Already cancelled" }, "404": { description: "Not found" } }
-        }
-      }
-    }
+    paths: {}
   },
   apis: []
 });
-
 app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 /* ======================
@@ -227,16 +50,13 @@ app.post("/login", async (req, res) => {
     if (!username || !password) {
       return res.status(400).json({ message: "Username and password required" });
     }
-
     const { rows } = await pool.query(
       "SELECT id, username FROM admins WHERE username = $1 AND password = $2",
       [username, password]
     );
-
     if (rows.length === 0) {
       return res.status(401).json({ message: "Pogrešno korisničko ime ili lozinka" });
     }
-
     res.json({ ok: true, username: rows[0].username });
   } catch (err: any) {
     console.error("POST /login error:", err?.message);
@@ -474,7 +294,6 @@ app.get("/salon-hours", async (_req, res) => {
     const { rows } = await pool.query(
       "SELECT day_of_week, open_time, close_time, is_closed FROM salon_hours ORDER BY day_of_week"
     );
-    // Konvertuj time u string HH:MM
     const result = rows.map((r: any) => ({
       day_of_week: r.day_of_week,
       open_time:   r.open_time.slice(0, 5),
@@ -491,7 +310,6 @@ app.get("/salon-hours", async (_req, res) => {
 app.put("/salon-hours", async (req, res) => {
   try {
     const { hours } = req.body;
-    // hours = [{ day_of_week, open_time, close_time, is_closed }, ...]
     if (!Array.isArray(hours) || hours.length !== 7) {
       return res.status(400).json({ message: "Očekujem niz od 7 dana" });
     }
@@ -500,8 +318,7 @@ app.put("/salon-hours", async (req, res) => {
       await client.query("BEGIN");
       for (const h of hours) {
         await client.query(
-          `UPDATE salon_hours SET open_time=$1, close_time=$2, is_closed=$3
-           WHERE day_of_week=$4`,
+          `UPDATE salon_hours SET open_time=$1, close_time=$2, is_closed=$3 WHERE day_of_week=$4`,
           [h.open_time, h.close_time, h.is_closed, h.day_of_week]
         );
       }
@@ -536,6 +353,7 @@ function isDiscountActive(discountUntil: string | null): boolean {
   return today <= until;
 }
 
+// POST /reservations — kreira novu rezervaciju
 app.post("/reservations", async (req, res) => {
   try {
     const { first_name, last_name, email, phone, address1, postal_code, city, country, currency, promo_code_used, items } = req.body;
@@ -547,19 +365,14 @@ app.post("/reservations", async (req, res) => {
       return res.status(400).json({ message: "At least one reservation item is required" });
     }
 
-
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
 
-      // Proveri zatvorene dane za svaki item
-      const hoursRes = await client.query(
-        "SELECT day_of_week, is_closed FROM salon_hours"
-      );
+      // Proveri zatvorene dane
+      const hoursRes = await client.query("SELECT day_of_week, is_closed FROM salon_hours");
       const closedDays = new Set(
-        hoursRes.rows
-          .filter((r: any) => r.is_closed)
-          .map((r: any) => r.day_of_week)
+        hoursRes.rows.filter((r: any) => r.is_closed).map((r: any) => r.day_of_week)
       );
       for (const it of items) {
         const dow = new Date(it.date + "T00:00:00").getDay();
@@ -571,34 +384,37 @@ app.post("/reservations", async (req, res) => {
         }
       }
 
-
-
-      // Promo kod validacija
+      // ─── Promo kod validacija ──────────────────────────────────────────────
+      // PRAVILA:
+      //   1. Kod mora biti stvarno generisan od sistema (mora postojati u bazi)
+      //   2. Rezervacija čiji je kod ne sme biti otkazana
+      //   3. Kod može biti iskorišćen samo jednom (promo_code_used = false u bazi)
+      //   4. Bilo ko može koristiti kod — i vlasnik i drugi korisnici
+      // BUGFIX: u originalu je bio email check koji je dozvoljavao samo vlasniku
+      //         da ga koristi — to je bilo pogrešno i uklonjeno je.
       let promoDiscount = false;
       let promoReservationId: number | null = null;
 
       if (promo_code_used) {
         const promoRes = await client.query(
-          "SELECT id, email, status, promo_code_used FROM reservations WHERE promo_code = $1",
+          "SELECT id, status, promo_code_used FROM reservations WHERE promo_code = $1",
           [promo_code_used.toUpperCase()]
         );
+        // Kod ne postoji u bazi — odbij (sprečava unos nasumičnih stringova)
         if (promoRes.rows.length === 0) {
           await client.query("ROLLBACK");
           return res.status(400).json({ message: "Promo kod nije pronađen" });
         }
         const promoRow = promoRes.rows[0];
+        // Kod otkazane rezervacije nije važeći
         if (promoRow.status === "cancelled") {
           await client.query("ROLLBACK");
           return res.status(400).json({ message: "Promo kod otkazane rezervacije nije važeći" });
         }
+        // Kod je već jednom iskorišćen
         if (promoRow.promo_code_used) {
           await client.query("ROLLBACK");
           return res.status(400).json({ message: "Promo kod je već iskorišćen" });
-        }
-        // Promo kod može koristiti samo vlasnik — email mora odgovarati
-        if (promoRow.email.toLowerCase() !== email.toLowerCase()) {
-          await client.query("ROLLBACK");
-          return res.status(400).json({ message: "Ovaj promo kod nije namenjen ovom email-u" });
         }
         promoDiscount = true;
         promoReservationId = promoRow.id;
@@ -646,12 +462,21 @@ app.post("/reservations", async (req, res) => {
 
       await client.query("UPDATE reservations SET total_amount=$1 WHERE id=$2", [total, reservation.id]);
 
+      // Označi promo kod kao iskorišćen
       if (promoReservationId !== null) {
         await client.query("UPDATE reservations SET promo_code_used=TRUE WHERE id=$1", [promoReservationId]);
       }
 
       await client.query("COMMIT");
-      return res.status(201).json({ reservationId: reservation.id, accessCode: reservation.access_code, promoCode: reservation.promo_code, subtotal, discount10, discount5, totalAmount: total, currency: currency ?? "RSD", status: reservation.status });
+      return res.status(201).json({
+        reservationId: reservation.id,
+        accessCode: reservation.access_code,
+        promoCode: reservation.promo_code,
+        subtotal, discount10, discount5,
+        totalAmount: total,
+        currency: currency ?? "RSD",
+        status: reservation.status
+      });
 
     } catch (e) {
       await client.query("ROLLBACK");
@@ -665,10 +490,14 @@ app.post("/reservations", async (req, res) => {
   }
 });
 
+// GET /reservations — lista za admin
+// IZMENA: vraća i access_code, promo_code, promo_code_used za admin panel
 app.get("/reservations", async (_req, res) => {
   try {
     const { rows } = await pool.query(
-      "SELECT id,first_name,last_name,email,total_amount,status,created_at FROM reservations ORDER BY created_at DESC LIMIT 50"
+      `SELECT id, first_name, last_name, email, total_amount, status, created_at,
+              access_code, promo_code, promo_code_used
+       FROM reservations ORDER BY created_at DESC LIMIT 50`
     );
     res.json(rows);
   } catch (err: any) {
@@ -677,6 +506,7 @@ app.get("/reservations", async (_req, res) => {
   }
 });
 
+// GET /reservations/slots
 app.get("/reservations/slots", async (req, res) => {
   try {
     const { service_id, date } = req.query;
@@ -702,24 +532,7 @@ app.get("/reservations/slots", async (req, res) => {
   }
 });
 
-app.get("/reservations/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const header = await pool.query("SELECT * FROM reservations WHERE id=$1", [id]);
-    if (header.rows.length === 0) return res.status(404).json({ message: "Reservation not found" });
-    const items = await pool.query(
-      `SELECT ri.id, ri.service_id, s.name as service_name, ri.date, ri.time, ri.unit_price, ri.line_total
-       FROM reservation_items ri JOIN services s ON s.id=ri.service_id
-       WHERE ri.reservation_id=$1 ORDER BY ri.date, ri.time`,
-      [id]
-    );
-    res.json({ reservation: header.rows[0], items: items.rows });
-  } catch (err: any) {
-    console.error("GET /reservations/:id error:", err?.message);
-    res.status(500).json({ message: "Failed to load reservation" });
-  }
-});
-
+// POST /reservations/lookup — MORA biti pre /:id rute!
 app.post("/reservations/lookup", async (req, res) => {
   try {
     const { access_code, email } = req.body;
@@ -742,6 +555,41 @@ app.post("/reservations/lookup", async (req, res) => {
   }
 });
 
+// GET /reservations/:id
+app.get("/reservations/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const header = await pool.query("SELECT * FROM reservations WHERE id=$1", [id]);
+    if (header.rows.length === 0) return res.status(404).json({ message: "Reservation not found" });
+    const items = await pool.query(
+      `SELECT ri.id, ri.service_id, s.name as service_name, ri.date, ri.time, ri.unit_price, ri.line_total
+       FROM reservation_items ri JOIN services s ON s.id=ri.service_id
+       WHERE ri.reservation_id=$1 ORDER BY ri.date, ri.time`,
+      [id]
+    );
+    res.json({ reservation: header.rows[0], items: items.rows });
+  } catch (err: any) {
+    console.error("GET /reservations/:id error:", err?.message);
+    res.status(500).json({ message: "Failed to load reservation" });
+  }
+});
+
+// DELETE /reservations/:id — samo za admina, trajno briše rezervaciju
+app.delete("/reservations/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const found = await pool.query("SELECT id FROM reservations WHERE id=$1", [id]);
+    if (found.rows.length === 0) return res.status(404).json({ message: "Rezervacija nije pronađena" });
+    await pool.query("DELETE FROM reservation_items WHERE reservation_id=$1", [id]);
+    await pool.query("DELETE FROM reservations WHERE id=$1", [id]);
+    res.json({ message: "Rezervacija obrisana", reservationId: Number(id) });
+  } catch (err: any) {
+    console.error("DELETE /reservations/:id error:", err?.message);
+    res.status(500).json({ message: "Failed to delete reservation" });
+  }
+});
+
+// POST /reservations/:id/items
 app.post("/reservations/:id/items", async (req, res) => {
   try {
     const { id } = req.params;
@@ -759,7 +607,6 @@ app.post("/reservations/:id/items", async (req, res) => {
     const svc = await pool.query("SELECT * FROM services WHERE id=$1", [service_id]);
     if (svc.rows.length === 0) return res.status(404).json({ message: "Usluga nije pronađena" });
 
-    // Proveri kapacitet
     const taken = await pool.query(
       `SELECT COUNT(*) as cnt FROM reservation_items ri
        JOIN reservations r ON r.id=ri.reservation_id
@@ -771,8 +618,6 @@ app.post("/reservations/:id/items", async (req, res) => {
     }
 
     const unitPrice = Number(svc.rows[0].price_rsd);
-
-    // Proveri da li je 10% popust aktivan
     const settings = await pool.query("SELECT discount_until FROM settings LIMIT 1");
     const tenPct = isDiscountActive(settings.rows[0]?.discount_until ?? null);
     const lineTotal = tenPct ? Math.round(unitPrice * 0.90) : unitPrice;
@@ -781,7 +626,6 @@ app.post("/reservations/:id/items", async (req, res) => {
       "INSERT INTO reservation_items (reservation_id,service_id,date,time,unit_price,line_total) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *",
       [id, service_id, date, time, unitPrice, lineTotal]
     );
-    // Ažuriraj ukupni iznos
     const newTotal = Number(found.rows[0].total_amount) + lineTotal;
     await pool.query("UPDATE reservations SET total_amount=$1 WHERE id=$2", [newTotal, id]);
 
@@ -795,6 +639,7 @@ app.post("/reservations/:id/items", async (req, res) => {
   }
 });
 
+// DELETE /reservations/:id/items/:itemId
 app.delete("/reservations/:id/items/:itemId", async (req, res) => {
   try {
     const { id, itemId } = req.params;
@@ -815,8 +660,6 @@ app.delete("/reservations/:id/items/:itemId", async (req, res) => {
     if (item.rows.length === 0) return res.status(404).json({ message: "Stavka nije pronađena" });
 
     await pool.query("DELETE FROM reservation_items WHERE id=$1", [itemId]);
-
-    // Ažuriraj ukupni iznos
     const newTotal = Math.max(0, Number(found.rows[0].total_amount) - Number(item.rows[0].line_total));
     await pool.query("UPDATE reservations SET total_amount=$1 WHERE id=$2", [newTotal, id]);
 
@@ -827,6 +670,7 @@ app.delete("/reservations/:id/items/:itemId", async (req, res) => {
   }
 });
 
+// POST /reservations/:id/cancel
 app.post("/reservations/:id/cancel", async (req, res) => {
   try {
     const { id } = req.params;
@@ -845,6 +689,7 @@ app.post("/reservations/:id/cancel", async (req, res) => {
     res.status(500).json({ message: "Failed to cancel reservation" });
   }
 });
+
 /* ======================
    404
 ====================== */
