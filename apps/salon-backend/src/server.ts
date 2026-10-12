@@ -8,6 +8,7 @@ import swaggerJsdoc from "swagger-jsdoc";
 import { ensureRedis } from "./cache/redis";
 import { getOrSetJSON, delKey } from "./cache/cacheHelpers";
 import { pool } from "./db/pool";
+import { ensurePublisher, publish, CHANNELS } from "./pubsub";
 
 import pg from "pg";
 pg.types.setTypeParser(1082, (val: string) => val);
@@ -99,7 +100,7 @@ app.put("/settings", async (req, res) => {
 });
 
 /* ======================
-   CATALOG (CACHED)
+   CATALOG (CACHED) - prikas usluga po kategorijama
 ====================== */
 const CATALOG_CACHE_KEY = "catalog:v1";
 const CATALOG_TTL = 180;
@@ -135,6 +136,22 @@ app.get("/catalog", async (_req, res) => {
     res.json(result.data);
   } catch {
     res.status(500).json({ message: "Failed to load catalog" });
+  }
+});
+
+// Admin endpoint — bez keša
+app.get("/services", async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT s.*, c.name as category_name
+      FROM services s
+      JOIN categories c ON c.id = s.category_id
+      ORDER BY s.category_id, s.id
+    `);
+    res.json(rows);
+  } catch (err: any) {
+    console.error("GET /services error:", err?.message);
+    res.status(500).json({ message: "Failed to load services" });
   }
 });
 
@@ -296,8 +313,8 @@ app.get("/salon-hours", async (_req, res) => {
     );
     const result = rows.map((r: any) => ({
       day_of_week: r.day_of_week,
-      open_time:   r.open_time.slice(0, 5),
-      close_time:  r.close_time.slice(0, 5),
+      open_time:   r.open_time  ? r.open_time.slice(0, 5)  : null,
+      close_time:  r.close_time ? r.close_time.slice(0, 5) : null,
       is_closed:   r.is_closed,
     }));
     res.json(result);
@@ -338,141 +355,70 @@ app.put("/salon-hours", async (req, res) => {
 
 /* ======================
    RESERVATIONS
+   ARHITEKTURA C:
+   POST /reservations — publishuje na Redis, worker upisuje u bazu
+   POST /items i /cancel — publishuju event POSLE upisa (upis ostaje ovde)
 ====================== */
-function randomCode(len = 8) {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let out = "";
-  for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
-  return out;
-}
-
-function isDiscountActive(discountUntil: string | null): boolean {
-  if (!discountUntil) return false;
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const until = new Date(discountUntil); until.setHours(0, 0, 0, 0);
-  return today <= until;
-}
 
 app.post("/reservations", async (req, res) => {
+  const { first_name, last_name, email, phone, address1, postal_code, city, country, currency, promo_code_used, items } = req.body;
+
+  if (!first_name || !last_name || !email || !address1 || !postal_code || !city || !country) {
+    return res.status(400).json({ message: "Missing required customer fields" });
+  }
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ message: "At least one reservation item is required" });
+  }
+  for (const it of items) {
+    if (!it.service_id || !it.date || !it.time) {
+      return res.status(400).json({ message: "Each item needs service_id, date, time" });
+    }
+  }
+
   try {
-    const { first_name, last_name, email, phone, address1, postal_code, city, country, currency, promo_code_used, items } = req.body;
+    // Generišemo access_code i promo_code ovde, pre queue-a
+    const accessCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+    const promoCode = Math.random().toString(36).substring(2, 8).toUpperCase();
 
-    if (!first_name || !last_name || !email || !address1 || !postal_code || !city || !country) {
-      return res.status(400).json({ message: "Missing required customer fields" });
-    }
-    if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ message: "At least one reservation item is required" });
-    }
+    await publish(CHANNELS.RESERVATION_CREATED, {
+      first_name, last_name, email, phone: phone ?? null,
+      address1, postal_code, city, country,
+      currency: currency ?? "RSD",
+      promo_code_used: promo_code_used ?? null,
+      access_code: accessCode,
+      promo_code: promoCode,
+      items,
+    });
 
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
+    console.log(`📨 Reservation queued for ${first_name} ${last_name}`);
 
-      // Proveri zatvorene dane
-      const hoursRes = await client.query("SELECT day_of_week, is_closed FROM salon_hours");
-      const closedDays = new Set(
-        hoursRes.rows.filter((r: any) => r.is_closed).map((r: any) => r.day_of_week)
-      );
-      for (const it of items) {
-        const dow = new Date(it.date + "T00:00:00").getDay();
-        if (closedDays.has(dow)) {
-          await client.query("ROLLBACK");
-          return res.status(400).json({
-            message: `Salon je zatvoren ${new Date(it.date + "T00:00:00").toLocaleDateString("sr-RS", { weekday: "long" })} — izaberi drugi datum.`
-          });
-        }
-      }
-
-      let promoDiscount = false;
-      let promoReservationId: number | null = null;
-
-      if (promo_code_used) {
-        const promoRes = await client.query(
-          "SELECT id, status, promo_code_used FROM reservations WHERE promo_code = $1",
-          [promo_code_used.toUpperCase()]
-        );
-        if (promoRes.rows.length === 0) {
-          await client.query("ROLLBACK");
-          return res.status(400).json({ message: "Promo kod nije pronađen" });
-        }
-        const promoRow = promoRes.rows[0];
-        if (promoRow.status === "cancelled") {
-          await client.query("ROLLBACK");
-          return res.status(400).json({ message: "Promo kod otkazane rezervacije nije važeći" });
-        }
-        if (promoRow.promo_code_used) {
-          await client.query("ROLLBACK");
-          return res.status(400).json({ message: "Promo kod je već iskorišćen" });
-        }
-        promoDiscount = true;
-        promoReservationId = promoRow.id;
-      }
-
-      const settingsRes = await client.query("SELECT discount_until FROM settings LIMIT 1");
-      const tenPctActive = isDiscountActive(settingsRes.rows[0]?.discount_until ?? null);
-
-      const accessCode = randomCode(8);
-      const promoCode = randomCode(6);
-
-      const ins = await client.query(
-        `INSERT INTO reservations (first_name,last_name,email,phone,address1,postal_code,city,country,access_code,promo_code,currency)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-        [first_name, last_name, email, phone ?? null, address1, postal_code, city, country, accessCode, promoCode, currency ?? "RSD"]
-      );
-      const reservation = ins.rows[0];
-
-      let subtotal = 0;
-      for (const it of items) {
-        const { service_id, date, time } = it;
-        if (!service_id || !date || !time) {
-          await client.query("ROLLBACK");
-          return res.status(400).json({ message: "Each item needs service_id, date, time" });
-        }
-        const svc = await client.query("SELECT id, price_rsd FROM services WHERE id=$1", [service_id]);
-        if (svc.rows.length === 0) {
-          await client.query("ROLLBACK");
-          return res.status(400).json({ message: `Service ${service_id} not found` });
-        }
-        const unitPrice = Number(svc.rows[0].price_rsd);
-        subtotal += unitPrice;
-        await client.query(
-          "INSERT INTO reservation_items (reservation_id,service_id,date,time,unit_price,line_total) VALUES ($1,$2,$3,$4,$5,$6)",
-          [reservation.id, service_id, date, time, unitPrice, unitPrice]
-        );
-      }
-
-      let total = subtotal;
-      let discount10 = 0;
-      let discount5 = 0;
-      if (tenPctActive) { discount10 = Math.round(total * 0.10); total -= discount10; }
-      if (promoDiscount) { discount5 = Math.round(total * 0.05); total -= discount5; }
-
-      await client.query("UPDATE reservations SET total_amount=$1 WHERE id=$2", [total, reservation.id]);
-
-      if (promoReservationId !== null) {
-        await client.query("UPDATE reservations SET promo_code_used=TRUE WHERE id=$1", [promoReservationId]);
-      }
-
-      await client.query("COMMIT");
-      return res.status(201).json({
-        reservationId: reservation.id,
-        accessCode: reservation.access_code,
-        promoCode: reservation.promo_code,
-        subtotal, discount10, discount5,
-        totalAmount: total,
-        currency: currency ?? "RSD",
-        status: reservation.status
-      });
-
-    } catch (e) {
-      await client.query("ROLLBACK");
-      throw e;
-    } finally {
-      client.release();
-    }
+    return res.status(202).json({
+      message: "Rezervacija je primljena i biće obrađena.",
+      queued: true,
+      accessCode,
+      promoCode,
+    });
   } catch (err: any) {
-    console.error("POST /reservations error:", err?.message);
-    return res.status(500).json({ message: "Failed to create reservation" });
+    console.error("POST /reservations publish error:", err?.message);
+    return res.status(500).json({ message: "Failed to queue reservation" });
+  }
+});
+
+app.post("/promo/validate", async (req, res) => {
+  const { promo_code } = req.body;
+  if (!promo_code) return res.status(400).json({ valid: false, message: "Promo kod je obavezan" });
+  try {
+    const { rows } = await pool.query(
+      "SELECT id, status, promo_code_used FROM reservations WHERE promo_code = $1",
+      [promo_code.toUpperCase()]
+    );
+    if (rows.length === 0) return res.json({ valid: false, message: "Promo kod ne postoji" });
+    const row = rows[0];
+    if (row.status === "cancelled") return res.json({ valid: false, message: "Promo kod nije važeći" });
+    if (row.promo_code_used) return res.json({ valid: false, message: "Promo kod je već iskorišćen" });
+    res.json({ valid: true });
+  } catch (err: any) {
+    res.status(500).json({ valid: false, message: "Greška pri proveri" });
   }
 });
 
@@ -562,12 +508,26 @@ app.delete("/reservations/:id", async (req, res) => {
     if (found.rows.length === 0) return res.status(404).json({ message: "Rezervacija nije pronađena" });
     await pool.query("DELETE FROM reservation_items WHERE reservation_id=$1", [id]);
     await pool.query("DELETE FROM reservations WHERE id=$1", [id]);
+
+    // Obavesti portal
+    await publish(CHANNELS.RESERVATION_CANCELLED, {
+      reservation_id: Number(id),
+      cancelled_at: new Date().toISOString(),
+    });
+
     res.json({ message: "Rezervacija obrisana", reservationId: Number(id) });
   } catch (err: any) {
     console.error("DELETE /reservations/:id error:", err?.message);
     res.status(500).json({ message: "Failed to delete reservation" });
   }
 });
+
+function isDiscountActive(discountUntil: string | null): boolean {
+  if (!discountUntil) return false;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const until = new Date(discountUntil); until.setHours(0, 0, 0, 0);
+  return today <= until;
+}
 
 app.post("/reservations/:id/items", async (req, res) => {
   try {
@@ -608,6 +568,15 @@ app.post("/reservations/:id/items", async (req, res) => {
     const newTotal = Number(found.rows[0].total_amount) + lineTotal;
     await pool.query("UPDATE reservations SET total_amount=$1 WHERE id=$2", [newTotal, id]);
 
+    // Publishuj event za portal
+    await publish(CHANNELS.RESERVATION_UPDATED, {
+      reservation_id: Number(id),
+      action: "item_added",
+      service_id,
+      date,
+      time,
+    });
+
     res.status(201).json({
       item: { ...ins.rows[0], service_name: svc.rows[0].name },
       total_amount: newTotal,
@@ -641,6 +610,14 @@ app.delete("/reservations/:id/items/:itemId", async (req, res) => {
     const newTotal = Math.max(0, Number(found.rows[0].total_amount) - Number(item.rows[0].line_total));
     await pool.query("UPDATE reservations SET total_amount=$1 WHERE id=$2", [newTotal, id]);
 
+    // Publishuj event za portal
+    await publish(CHANNELS.RESERVATION_UPDATED, {
+      reservation_id: Number(id),
+      action: "item_removed",
+      service_id: item.rows[0].service_id,
+      item_id: Number(itemId),
+    });
+
     res.json({ message: "Usluga uklonjena", total_amount: newTotal });
   } catch (err: any) {
     console.error("DELETE /reservations/:id/items/:itemId error:", err?.message);
@@ -659,7 +636,15 @@ app.post("/reservations/:id/cancel", async (req, res) => {
     );
     if (found.rows.length === 0) return res.status(404).json({ message: "Rezervacija nije pronađena" });
     if (found.rows[0].status === "cancelled") return res.status(400).json({ message: "Već otkazana" });
+
     await pool.query("UPDATE reservations SET status='cancelled' WHERE id=$1", [id]);
+
+    // Publishuj event za portal
+    await publish(CHANNELS.RESERVATION_CANCELLED, {
+      reservation_id: Number(id),
+      cancelled_at: new Date().toISOString(),
+    });
+
     res.json({ message: "Rezervacija otkazana", reservationId: Number(id) });
   } catch (err: any) {
     console.error("POST /reservations/:id/cancel error:", err?.message);
@@ -668,7 +653,7 @@ app.post("/reservations/:id/cancel", async (req, res) => {
 });
 
 /* ======================
-   REPORTING
+   REPORTING (za salon-frontend admin)
 ====================== */
 app.get("/reports/by-category", async (_req, res) => {
   try {
@@ -706,6 +691,14 @@ app.get("/reports/by-date", async (_req, res) => {
 });
 
 /* ======================
+   CACHE BUST
+====================== */
+app.post("/cache/bust-catalog", async (_req, res) => {
+  await delKey(CATALOG_CACHE_KEY);
+  res.json({ ok: true });
+});
+
+/* ======================
    404
 ====================== */
 app.use((_req, res) => {
@@ -717,7 +710,9 @@ app.use((_req, res) => {
 ====================== */
 async function start() {
   try { await ensureRedis(); }
-  catch { console.warn("⚠️ Redis unavailable, continuing without cache"); }
+  catch { console.warn("⚠️ Redis cache unavailable, continuing without cache"); }
+  try { await ensurePublisher(); }
+  catch { console.warn("⚠️ Redis publisher unavailable"); }
   app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 }
 

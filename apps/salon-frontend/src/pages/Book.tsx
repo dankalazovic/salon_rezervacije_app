@@ -2,8 +2,6 @@ import { useEffect, useState } from "react";
 import DatePicker, { registerLocale } from "react-datepicker";
 import { enUS } from "date-fns/locale/en-US";
 import "react-datepicker/dist/react-datepicker.css";
-import Button from "../components/Button";
-import Card from "../components/Card";
 
 // Srpski locale latinica, ručno — weekStartsOn:1 = Ponedeljak prvi dan
 const srLatinLocale = {
@@ -72,7 +70,7 @@ interface SalonHour {
   is_closed: boolean;
 }
 
-// ─── Datepicker CSS override (pink theme) ────────────────────────────────────
+// ─── Datepicker CSS override ────────────────────────────────────
 
 const datepickerStyles = `
   .salon-datepicker .react-datepicker {
@@ -168,7 +166,7 @@ function minutesToTime(mins: number): string {
   const m = (mins % 60).toString().padStart(2, "0");
   return `${h}:${m}`;
 }
-
+/*konflikt za rezervacije-preklapanje */
 function hasTimeConflict(items: SelectedItem[]): string | null {
   const scheduled = items.filter((i) => i.date && i.time);
   for (let a = 0; a < scheduled.length; a++) {
@@ -402,9 +400,6 @@ function ServiceSlotPicker({
     return !sh.is_closed;
   }
 
-  function isSlotFull(time: string) {
-    return (takenSlots[time] ?? 0) >= Number(service.max_clients);
-  }
 
   function isSlotConflicting(time: string): boolean {
     if (!item.date) return false;
@@ -503,7 +498,7 @@ function ServiceSlotPicker({
   );
 }
 
-// ─── Step 2 ───────────────────────────────────────────────────────────────────
+// ─── Step 2 ─────────────────────────────────────────────────────────────────── !!!!!!
 
 function Step2({
   catalog, selected, currency, currencies, promoInput, salonHours, discountUntil,
@@ -528,6 +523,35 @@ function Step2({
   const isSelected = (id: number) => selected.some((s) => s.service.id === id);
   const conflictError = hasTimeConflict(selected);
   const canProceed = selected.length > 0 && selected.every((s) => s.date && s.time) && !conflictError;
+
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [promoChecking, setPromoChecking] = useState(false);
+//handleNext za proveru validnosti koda
+  async function handleNext() {
+    if (promoInput.length > 0) {
+      setPromoChecking(true);
+      setPromoError(null);
+      try {
+        const r = await fetch(`${API}/promo/validate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ promo_code: promoInput }),
+        });
+        const data = await r.json();
+        if (!data.valid) {
+          setPromoError(data.message ?? "Promo kod nije važeći.");
+          setPromoChecking(false);
+          return;
+        }
+      } catch {
+        setPromoError("Greška pri proveri promo koda.");
+        setPromoChecking(false);
+        return;
+      }
+      setPromoChecking(false);
+    }
+    onNext();
+  }
 
   // Formatiraj datum popusta za prikaz
   const discountDateFormatted = discountUntil
@@ -659,16 +683,20 @@ function Step2({
         </div>
       </div>
 
+      {promoError && (
+        <div style={{ borderRadius: "14px", background: "#fee2e2", border: "1.5px solid #fca5a5", color: "#991b1b", padding: "0.7rem 1rem", fontSize: "0.85rem", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+          ❌ {promoError}
+        </div>
+      )}
       <div style={{ display: "flex", gap: "0.75rem" }}>
         <button className="btn-secondary" onClick={onBack}>← Nazad</button>
-        <button className="btn-primary" style={{ flex: 1, opacity: canProceed ? 1 : 0.5 }} disabled={!canProceed} onClick={onNext}>
-          Nastavi — pregled ✨
+        <button className="btn-primary" style={{ flex: 1, opacity: canProceed ? 1 : 0.5 }} disabled={!canProceed || promoChecking} onClick={handleNext}>
+          {promoChecking ? "Proveravam kod…" : "Nastavi — pregled ✨"}
         </button>
       </div>
     </div>
   );
 }
-
 // ─── Step 3 ───────────────────────────────────────────────────────────────────
 
 function Step3({
@@ -1341,8 +1369,25 @@ export default function Book() {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message ?? "Greška pri rezervaciji");
-      setResult(data);
+      if (res.status !== 202 && !res.ok) throw new Error(data.message ?? "Greška pri rezervaciji");
+
+      // Izračunaj ukupno lokalno jer worker obrađuje asinhrono
+      const subtotal = selected.reduce((s, i) => s + Number(i.service.price_rsd), 0);
+      const discount10 = discountUntil ? Math.round(subtotal * 0.10) : 0;
+      const afterDiscount10 = subtotal - discount10;
+      const promoDiscount = promoInput.length >= 5 ? Math.round(afterDiscount10 * 0.05) : 0;
+      const totalRSD = afterDiscount10 - promoDiscount;
+
+      setResult({
+        reservationId: data.reservationId ?? 0,
+        accessCode: data.accessCode ?? "—",
+        promoCode: data.promoCode ?? "—",
+        totalAmount: totalRSD,
+        subtotal,
+        discount10,
+        discount5: promoDiscount,
+        currency,
+      });
     } catch (e: any) {
       setError(e.message ?? "Nepoznata greška");
     } finally {

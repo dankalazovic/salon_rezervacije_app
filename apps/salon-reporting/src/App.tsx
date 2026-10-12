@@ -3,7 +3,7 @@ import {
   BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line
 } from "recharts";
 
-const API = "http://localhost:4000";
+const API = "http://localhost:4001";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -263,7 +263,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
           <StatCard icon="📅" label="Ukupno termina" value={loading ? "…" : totalTermini} />
           <StatCard icon="📆" label="Dana sa rezervacijama" value={loading ? "…" : totalDana} />
           <StatCard icon="🏆" label="Najpopularnija kategorija" value={loading ? "…" : topKat} />
-          <StatCard icon="🔥" label={`Najaktivniji dan (${formatDate(maxDan.date)})`} value={loading ? "…" : maxDan.count === 0 ? "-" : `${maxDan.count} rez.`} />
+          <StatCard icon="🔥" label={`Najaktivniji dan${maxDan.date !== "-" ? ` (${formatDate(maxDan.date)})` : ""}`} value={loading ? "…" : maxDan.count === 0 ? "-" : `${maxDan.count} rez.`} />
         </div>
 
         {/* Grafikon 1 — po kategorijama */}
