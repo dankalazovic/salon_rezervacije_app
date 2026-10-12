@@ -1,0 +1,28 @@
+{
+  "name": "portal-backend",
+  "version": "1.0.0",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "dev:subscriber": "ts-node-dev --respawn --transpile-only src/subscriber.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "start:subscriber": "node dist/subscriber.js"
+  },
+  "type": "commonjs",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "pg": "^8.11.0",
+    "redis": "^4.6.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.13",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.0.0",
+    "@types/pg": "^8.10.0",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.0.0"
+  }
+}
