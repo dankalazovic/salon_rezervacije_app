@@ -15,37 +15,29 @@ export default function Navbar() {
   return (
     <>
       <nav className="navbar-glass sticky top-0 z-50">
-        <div style={{
-          maxWidth: "1152px",
-          margin: "0 auto",
-          padding: "0 2rem",
-          height: "72px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}>
-
-          {/* Logo — veći, pomeren desno */}
+        <div
+          style={{
+            maxWidth: "1152px",
+            margin: "0 auto",
+            padding: "0 2rem",
+            minHeight: "78px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
           <Link
             to="/"
             onClick={() => setOpen(false)}
-            style={{
-              textDecoration: "none",
-              marginLeft: "1.5rem",  /* pomeren u desno */
-            }}
+            style={{ textDecoration: "none" }}
           >
-            <span className="salon-name" style={{
-              fontSize: "1.85rem",
-              fontWeight: "bold",
-              color: "#c0185a",
-              letterSpacing: "0.05em",
-            }}>
-              Trač
-            </span>
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              <span className="brand-mark">T R A C</span>
+              <span className="brand-subtitle">BEAUTY STUDIO</span>
+            </div>
           </Link>
 
-          {/* Desktop links */}
-          <div className="hidden md:flex" style={{ alignItems: "center", gap: "0.25rem" }}>
+          <div className="hidden md:flex" style={{ alignItems: "center", gap: "0.35rem" }}>
             {links.map((l) => (
               <Link
                 key={l.to}
@@ -57,7 +49,6 @@ export default function Navbar() {
             ))}
           </div>
 
-          {/* Hamburger */}
           <button
             className={`hamburger md:hidden ${open ? "open" : ""}`}
             onClick={() => setOpen((v) => !v)}
@@ -70,7 +61,6 @@ export default function Navbar() {
         </div>
       </nav>
 
-      {/* Mobile menu */}
       <div className={`mobile-menu md:hidden ${open ? "open" : ""}`}>
         {links.map((l) => (
           <Link
